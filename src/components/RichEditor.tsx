@@ -231,12 +231,16 @@ interface Props {
   content: string
   onChange: (md: string) => void
   placeholder?: string
+  autoFocusEnd?: boolean
+  readOnly?: boolean
 }
 
 export default function RichEditor({
   content,
   onChange,
   placeholder = '输入内容，支持 Markdown 语法...',
+  autoFocusEnd = false,
+  readOnly = false,
 }: Props) {
   const [showColorPicker, setShowColorPicker] = useState(false)
 
@@ -269,10 +273,12 @@ export default function RichEditor({
       }),
     ],
     content: mdToHtml(content),
+    editable: !readOnly,
     onCreate: ({ editor: e }) => {
       if (e.state.doc.lastChild?.type.name === 'image') {
         e.commands.insertContentAt(e.state.doc.content.size, { type: 'paragraph' })
       }
+      if (autoFocusEnd) requestAnimationFrame(() => e.commands.focus('end'))
     },
     onUpdate: ({ editor: e }) => {
       onChange(td.turndown(e.getHTML()))
@@ -306,6 +312,8 @@ export default function RichEditor({
       },
     },
   })
+
+  useEffect(() => { editor?.setEditable(!readOnly, false) }, [editor, readOnly])
 
   const setLink = useCallback(() => {
     if (!editor) return
@@ -357,6 +365,7 @@ export default function RichEditor({
       onMouseDown={(e) => e.preventDefault()}
       onClick={run}
       title={tip}
+      disabled={readOnly}
     >
       {children}
     </button>
@@ -437,6 +446,7 @@ export default function RichEditor({
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setShowColorPicker(!showColorPicker)}
             title="文字颜色 / 高亮"
+            disabled={readOnly}
           >
             <span
               className="tb-color-icon"
@@ -451,7 +461,7 @@ export default function RichEditor({
               }}
             />
           </button>
-          {showColorPicker && (
+          {showColorPicker && !readOnly && (
             <ColorPicker
               editor={editor}
               onClose={() => setShowColorPicker(false)}

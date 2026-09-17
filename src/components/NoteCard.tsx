@@ -91,10 +91,13 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
   const card = useCardById(cardId)
   const isEditing = useIsEditing(cardId)
   const imageCacheVersion = useStore((s) => s.imageCacheVersion)
+  const instantEditing = useStore((s) => s.instantEditingCardId === cardId)
   const { moveCard, deleteCard, updateCard, setEditingCard } = useCardActions()
 
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [openingInstant, setOpeningInstant] = useState(false)
+  const [instantError, setInstantError] = useState('')
   const [title, setTitle] = useState(card?.title ?? '')
   const [content, setContent] = useState(card?.content ?? '')
   const cardRef = useRef<HTMLDivElement>(null)
@@ -154,6 +157,8 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
     measuredOnce.current = true
     prevContent.current = card.content
     prevTitle.current = card.title
+    // Existing cards retain the user's layout when content changes in another window.
+    if (card.height != null) return
     if (!firstMeasure && !contentChanged && !titleChanged) return
     requestAnimationFrame(() => {
       const h = measureHeight()
@@ -194,6 +199,23 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
 
   const closeEditing = () => {
     autoFitAndClose()
+  }
+
+  const openInstant = async (event: React.MouseEvent) => {
+    event.stopPropagation()
+    if (openingInstant) return
+    setOpeningInstant(true)
+    setInstantError('')
+    try {
+      if (isEditing) {
+        clearTimeout(saveTimer.current)
+        updateCard(cardId, { title, content })
+        setEditingCard(null)
+      }
+      await useStore.getState().flushPendingSave()
+      if (!await window.electronAPI.openInstantMode(cardId)) throw new Error('Missing card')
+    } catch { setInstantError('未能打开即刻模式，请重试。') }
+    finally { setOpeningInstant(false) }
   }
 
   useEffect(() => {
@@ -379,10 +401,25 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
           <span />
         </div>
         <div className="card-banner-actions">
+          <button
+            className="card-banner-btn card-instant-btn"
+            aria-label={`在即刻模式中编辑：${card.title || '无标题卡片'}`}
+            title={openingInstant ? '正在打开…' : '在即刻模式中编辑'}
+            aria-busy={openingInstant}
+            disabled={openingInstant}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => void openInstant(event)}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 2L5 13h6l-1 9 8-12h-6l1-8z" />
+            </svg>
+          </button>
           {!isEditing && (
             <button
               className="card-banner-btn card-edit-btn"
               title="编辑"
+              disabled={instantEditing}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={handleEdit}
             >
@@ -404,6 +441,9 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
           </button>
         </div>
       </div>
+
+      {instantEditing && <div className="card-instant-status">正在即刻模式中编辑</div>}
+      {instantError && <div className="card-instant-error" role="alert">{instantError}</div>}
 
       {isEditing ? (
         <div

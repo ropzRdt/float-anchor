@@ -1418,12 +1418,14 @@ input {
   top: 50%;
   transform: translateY(-50%);
   display: flex;
+  align-items: center;
   gap: 2px;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.note-card:hover .card-banner-actions {
+.note-card:hover .card-banner-actions,
+.card-banner-actions:focus-within {
   opacity: 1;
 }
 
@@ -3530,9 +3532,9 @@ input {
   --instant-muted: #7c837f;
   --instant-faint: #aeb3af;
   --instant-line: #e3e2da;
-  --instant-accent: #3b8f78;
+  --instant-accent: var(--capture-accent);
   --instant-accent-deep: #2b7563;
-  --instant-accent-soft: #e2f1ea;
+  --instant-accent-soft: var(--capture-soft);
   --instant-warm: #f49a68;
   --instant-submit-dot: #ffd073;
   position: relative;
@@ -3555,9 +3557,9 @@ input {
   --instant-muted: #9ba09d;
   --instant-faint: #6f7672;
   --instant-line: #373a3d;
-  --instant-accent: #66b69c;
+  --instant-accent: var(--capture-accent);
   --instant-accent-deep: #4a9a82;
-  --instant-accent-soft: #203b34;
+  --instant-accent-soft: var(--capture-soft);
   --instant-warm: #e5976e;
   --instant-submit-dot: #f6cb72;
   border-color: rgba(255, 255, 255, .09);
@@ -4386,3 +4388,45 @@ input {
     padding-top: 11px;
   }
 }
+
+/* Capture accent for the instant window and editing status. */
+:root { --capture-accent: #3b8f78; --capture-soft: #e2f1ea; }
+[data-theme="dark"] { --capture-accent: #66b69c; --capture-soft: #203b34; }
+.card-banner-btn:disabled { opacity: .45; cursor: wait; }
+.card-banner-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.card-instant-status { color: var(--capture-accent); font-size: 10px; padding: 0 18px; }
+.card-instant-error { color: var(--danger); font-size: 11px; padding: 4px 18px; }
+.instant-note-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--instant-muted); flex-shrink: 0; }
+.instant-note-nav > div { display: flex; gap: 4px; }
+.instant-note-nav button, .instant-note-location button, .instant-recent-heading button { padding: 4px 7px; border-radius: 6px; color: var(--instant-accent-deep); font-size: 11px; flex-shrink: 0; }
+.instant-note-nav button:hover, .instant-note-nav button.active, .instant-note-location button:hover, .instant-recent-heading button:hover { background: var(--instant-accent-soft); }
+.instant-editing-label { color: var(--instant-accent-deep); font-weight: 650; }
+.instant-note-location { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 38px; padding: 5px 8px 5px 12px; border: 1px solid var(--instant-line); border-radius: 10px; background: var(--instant-surface); flex-shrink: 0; }
+.instant-note-location > span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.instant-save-state { font-size: 9px; color: var(--instant-muted); }
+.instant-save-state.saved { color: var(--instant-accent-deep); }
+.instant-save-state.error { color: var(--danger); }
+.instant-editor-hint { font-size: 10px; color: var(--instant-muted); margin-top: -6px; }
+.instant-created { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--instant-accent-soft); border-radius: 8px; padding: 7px 10px; font-size: 11px; color: var(--instant-accent-deep); }
+.instant-created span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.instant-created button { flex-shrink: 0; font-size: 11px; font-weight: 650; padding: 3px; }
+.instant-recent { display: flex; flex-direction: column; min-height: 0; flex: 1; background: var(--instant-surface); border: 1px solid var(--instant-line); border-radius: 13px; overflow: hidden; }
+.instant-recent-heading { display: flex; justify-content: space-between; align-items: start; padding: 13px 14px 10px; }
+.instant-recent-heading h2 { font-size: 15px; font-weight: 650; }
+.instant-recent-heading p { font-size: 11px; color: var(--instant-muted); }
+.instant-recent-list { overflow-y: auto; min-height: 0; flex: 1; padding: 0 6px; }
+.instant-recent-item { display: flex; flex-direction: column; gap: 4px; text-align: left; width: 100%; padding: 12px 9px; border-bottom: 1px solid var(--instant-line); }
+.instant-recent-item:hover, .instant-recent-item.active { background: var(--instant-accent-soft); border-radius: 8px; }
+.instant-recent-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.instant-recent-title strong { font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.instant-recent-title small { font-size: 9px; color: var(--instant-muted); white-space: nowrap; }
+.instant-recent-excerpt { font-size: 11px; color: var(--instant-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.instant-recent-location { font-size: 10px; color: var(--instant-muted); }
+.instant-recent-footnote, .instant-recent-empty { padding: 12px 14px; font-size: 11px; color: var(--instant-muted); }
+.instant-error { flex-shrink: 0; border: 1px solid var(--danger); border-radius: 8px; padding: 9px 11px; font-size: 11px; background: var(--instant-surface); }
+.instant-error p { color: var(--danger); }
+.instant-error > div { display: flex; gap: 12px; margin-top: 5px; }
+.instant-error button { color: var(--instant-accent-deep); text-decoration: underline; }
+.instant-mode-shell button:focus-visible { outline: 2px solid var(--instant-accent); outline-offset: 2px; }
+.instant-mode-shell button:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .instant-mode-shell *, .card-instant-btn { animation: none !important; transition: none !important; } }

@@ -5,11 +5,11 @@ import rehypeRaw from 'rehype-raw'
 import { shallow } from 'zustand/shallow'
 import { useStore } from '../store'
 import RichEditor from './RichEditor'
+import { useInstantEditor } from '../useInstantEditor'
+import { findInstantNote } from '../lib/instantNotes'
 
 type CreateTarget = 'canvas' | 'section'
 
-const DRAFT_KEY = 'float-anchor-instant-draft'
-const TITLE_DRAFT_KEY = 'float-anchor-instant-title-draft'
 
 function CreateDialog({
   target,
@@ -38,6 +38,7 @@ function CreateDialog({
     <div className="instant-dialog-backdrop" onMouseDown={onCancel}>
       <form
         className="instant-dialog"
+        noValidate
         onSubmit={submit}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -94,10 +95,15 @@ export default function InstantModeWindow() {
   const activeCanvasId = useStore((state) => state.activeCanvasId)
   const [selectedCanvasId, setSelectedCanvasId] = useState('')
   const [selectedSectionId, setSelectedSectionId] = useState('')
-  const [title, setTitle] = useState(() => localStorage.getItem(TITLE_DRAFT_KEY) ?? '')
-  const [content, setContent] = useState(() => localStorage.getItem(DRAFT_KEY) ?? '')
+  const editor = useInstantEditor(loaded)
+  const { title, content, editorKey } = editor
+  const editingNote = editor.cardId ? findInstantNote({ canvases }, editor.cardId) : null
+  const [showRecent, setShowRecent] = useState(false)
+  const [lastCreatedId, setLastCreatedId] = useState<string | null>(null)
+  const pendingCreatedId = useRef<string | null>(null)
+  const recoveryCopyId = useRef<string | null>(null)
+  const [platform, setPlatform] = useState('darwin')
   const [createTarget, setCreateTarget] = useState<CreateTarget | null>(null)
-  const [editorKey, setEditorKey] = useState(0)
   const [preview, setPreview] = useState(false)
   const [alwaysOnTop, setAlwaysOnTop] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -134,15 +140,8 @@ export default function InstantModeWindow() {
     }
   }, [sections, selectedSectionId])
 
-  useEffect(() => {
-    if (content) localStorage.setItem(DRAFT_KEY, content)
-    else localStorage.removeItem(DRAFT_KEY)
-  }, [content])
-
-  useEffect(() => {
-    if (title) localStorage.setItem(TITLE_DRAFT_KEY, title)
-    else localStorage.removeItem(TITLE_DRAFT_KEY)
-  }, [title])
+  useEffect(() => { void window.electronAPI.getPlatform().then(setPlatform) }, [])
+  useEffect(() => { setPreview(false); setShowRecent(false) }, [editorKey])
 
   useEffect(() => () => clearTimeout(noticeTimer.current), [])
 
@@ -159,47 +158,71 @@ export default function InstantModeWindow() {
   }
 
   const completeCreation = async (name: string) => {
-    if (createTarget === 'canvas') {
-      const canvasId = createInstantCanvas(name)
-      setSelectedCanvasId(canvasId)
-      setSelectedSectionId('')
+    setSubmitting(true)
+    try {
+      if (createTarget === 'canvas') {
+        const canvasId = createInstantCanvas(name)
+        setSelectedCanvasId(canvasId)
+        setSelectedSectionId('')
+      } else if (createTarget === 'section' && selectedCanvasId) {
+        setSelectedSectionId(createInstantSection(selectedCanvasId, name))
+      }
+      setCreateTarget(null)
       await flushPendingSave()
       window.electronAPI.instantDataChanged()
-      showNotice(`已新建白板「${name}」`)
-    } else if (createTarget === 'section' && selectedCanvasId) {
-      const sectionId = createInstantSection(selectedCanvasId, name)
-      setSelectedSectionId(sectionId)
-      await flushPendingSave()
-      window.electronAPI.instantDataChanged()
-      showNotice(`已新建分区「${name}」`)
-    }
-    setCreateTarget(null)
+      showNotice('已创建并选择')
+    } catch { editor.setError('保存失败，请重试。') }
+    finally { setSubmitting(false) }
   }
 
   const submitCard = async () => {
-    if ((!title.trim() && !content.trim()) || !selectedCanvasId || submitting) return
+    if (submitting || editor.busy) return
+    if (editor.cardId) { await editor.startNew(); return }
+    if ((!title.trim() && !content.trim()) || !selectedCanvasId) return
     setSubmitting(true)
-    const sectionName = sections.find((section) => section.id === selectedSectionId)?.name
-    const cardId = createInstantCard(
-      selectedCanvasId,
-      selectedSectionId || null,
-      title,
-      content.trim(),
-    )
-    if (!cardId) {
-      showNotice('未能创建卡片，请重试')
-      setSubmitting(false)
-      return
-    }
-    await flushPendingSave()
-    window.electronAPI.instantDataChanged()
-    setTitle('')
-    setContent('')
-    setEditorKey((value) => value + 1)
-    setPreview(false)
-    setSubmitting(false)
-    showNotice(sectionName ? `已投入「${sectionName}」` : '卡片已投入白板')
-    requestAnimationFrame(() => titleInputRef.current?.focus())
+    try {
+      let cardId = pendingCreatedId.current
+      if (!cardId) {
+        cardId = createInstantCard(selectedCanvasId, selectedSectionId || null, title, content.trim())
+        pendingCreatedId.current = cardId
+      } else {
+        useStore.setState((state) => ({ canvases: state.canvases.map((canvas) => ({
+          ...canvas, cards: canvas.cards.map((card) => card.id === cardId ? { ...card, title, content } : card),
+        })) }))
+      }
+      if (!cardId) throw new Error('Missing destination')
+      await flushPendingSave()
+      window.electronAPI.instantDataChanged()
+      editor.finishNew(cardId)
+      setLastCreatedId(cardId)
+      pendingCreatedId.current = null
+      setPreview(false)
+      requestAnimationFrame(() => titleInputRef.current?.focus())
+    } catch { editor.setError('未能保存笔记，草稿已保留，请重试投入。') }
+    finally { setSubmitting(false) }
+  }
+
+  const saveRecoveryCopy = async () => {
+    if (submitting || editor.busy) return
+    setSubmitting(true)
+    try {
+      if (!recoveryCopyId.current) await loadData()
+      const state = useStore.getState()
+      const destination = state.canvases.find((c) => c.id === editingNote?.canvas.id) ?? state.canvases[0]
+      if (!destination) throw new Error('No board')
+      const id = recoveryCopyId.current ?? createInstantCard(destination.id, null, title, content)
+      if (!id) throw new Error('Empty note')
+      recoveryCopyId.current = id
+      useStore.setState((state) => ({ canvases: state.canvases.map((canvas) => ({
+        ...canvas, cards: canvas.cards.map((card) => card.id === id ? { ...card, title, content } : card),
+      })) }))
+      await flushPendingSave()
+      await editor.completeRecovery(id)
+      recoveryCopyId.current = null
+      window.electronAPI.instantDataChanged()
+      showNotice('已另存为新笔记，原笔记未被覆盖')
+    } catch { editor.setError('另存失败，当前内容已保留，请重试。') }
+    finally { setSubmitting(false) }
   }
 
   const toggleAlwaysOnTop = async () => {
@@ -236,7 +259,7 @@ export default function InstantModeWindow() {
           </button>
           <button
             className="instant-hide-button"
-            onClick={() => window.electronAPI.hideInstantMode()}
+            onClick={async () => { if (await editor.flush()) window.electronAPI.hideInstantMode() }}
             title="隐藏即刻模式"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -246,7 +269,7 @@ export default function InstantModeWindow() {
           </button>
           <button
             className="instant-restore-button"
-            onClick={() => window.electronAPI.closeInstantMode()}
+            onClick={() => void editor.leave()}
             title="恢复常规模式"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -270,7 +293,35 @@ export default function InstantModeWindow() {
           </div>
         </header>
 
-        <div className="instant-destination">
+        <nav className="instant-note-nav" aria-label="笔记切换">
+          <span className={editor.cardId ? 'instant-editing-label' : ''}>{editor.cardId ? '正在编辑已有笔记' : '新建笔记'}</span>
+          <div>
+            {editor.cardId && <button disabled={editor.busy || submitting} onClick={() => void editor.startNew()}>新建笔记</button>}
+            <button className={showRecent ? 'active' : ''} aria-expanded={showRecent} aria-controls="instant-recent-notes" disabled={editor.busy || submitting} onClick={() => setShowRecent((value) => !value)}>最近笔记</button>
+          </div>
+        </nav>
+
+        {showRecent ? (
+          <section id="instant-recent-notes" className="instant-recent" aria-label="最近笔记" onKeyDown={(event) => { if (event.key === 'Escape') setShowRecent(false) }}>
+            <div className="instant-recent-heading"><div><h2>最近笔记</h2><p>选择一篇，继续补充</p></div><button aria-label="关闭最近笔记" onClick={() => setShowRecent(false)}>关闭</button></div>
+            <div className="instant-recent-list">
+              {editor.recent.map((item) => {
+                const note = findInstantNote({ canvases }, item.cardId)
+                if (!note) return null
+                return <button key={item.cardId} className={`instant-recent-item ${editor.cardId === item.cardId ? 'active' : ''}`} disabled={editor.busy || submitting} onClick={() => void editor.openCard(item.cardId)}>
+                  <span className="instant-recent-title"><strong>{note.card.title || '无标题卡片'}</strong><small>{editor.cardId === item.cardId ? '正在编辑' : new Date(item.openedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></span>
+                  <span className="instant-recent-excerpt">{note.card.content.replace(/<[^>]+>|[#*`>]/g, '').slice(0, 100) || '暂无正文'}</span>
+                  <span className="instant-recent-location">{note.canvas.name}{note.section ? ` / ${note.section.name}` : ''}</span>
+                </button>
+              })}
+              {!editor.recent.some((item) => findInstantNote({ canvases }, item.cardId)) && <p className="instant-recent-empty">还没有最近笔记。投入一条笔记，或点击白板卡片右上角的闪电继续编辑。</p>}
+            </div>
+            <p className="instant-recent-footnote">显示最近在即刻模式中使用的 10 篇笔记</p>
+          </section>
+        ) : <>
+        {editor.cardId ? (
+          <div className="instant-note-location"><span title={editingNote?.canvas.name}>{editingNote ? `${editingNote.canvas.name}${editingNote.section ? ` / ${editingNote.section.name}` : ''}` : '原笔记不可用'}</span><button disabled={editor.busy || submitting} onClick={() => void editor.leave(true)}>在白板中查看</button></div>
+        ) : <div className="instant-destination">
           <div className="instant-field">
             <label htmlFor="instant-canvas-select">
               <span>01</span>
@@ -335,16 +386,16 @@ export default function InstantModeWindow() {
               </button>
             </div>
           </div>
-        </div>
+        </div>}
 
         <section className="instant-note">
           <div className="instant-note-heading">
             <label htmlFor="instant-note-input">
-              <span>03</span>
+              {!editor.cardId && <span>03</span>}
               卡片笔记
             </label>
             <div className="instant-note-heading-actions">
-              <span className="instant-live-markdown">实时 Markdown · {content.length}</span>
+              <span className={`instant-save-state ${editor.status}`} role="status">{editor.cardId ? ({ saved: '已保存到本机', saving: '保存中…', unsaved: '待保存', error: '保存失败' }[editor.status]) : `实时 Markdown · ${content.length}`}</span>
               <button
                 className={preview ? 'active' : ''}
                 onClick={() => setPreview((value) => !value)}
@@ -359,7 +410,7 @@ export default function InstantModeWindow() {
             ref={editorContainerRef}
             className="instant-editor"
             onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+              if (!event.nativeEvent.isComposing && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault()
                 void submitCard()
               }
@@ -378,12 +429,14 @@ export default function InstantModeWindow() {
                   ref={titleInputRef}
                   className="instant-note-title"
                   value={title}
-                  onChange={(event) => setTitle(event.target.value.slice(0, 120))}
+                  onChange={(event) => editor.change({ title: event.target.value.slice(0, 120) })}
+                  disabled={editor.busy || submitting}
+                  aria-label="卡片标题"
                   placeholder="卡片标题"
                   spellCheck
-                  autoFocus
+                  autoFocus={!editor.cardId}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+                    if (!event.nativeEvent.isComposing && event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
                       event.preventDefault()
                       editorContainerRef.current?.querySelector<HTMLElement>('.ProseMirror')?.focus()
                     }
@@ -393,7 +446,9 @@ export default function InstantModeWindow() {
                   <RichEditor
                     key={editorKey}
                     content={content}
-                    onChange={setContent}
+                    onChange={(value) => editor.change({ content: value })}
+                    autoFocusEnd={!!editor.cardId}
+                    readOnly={editor.busy || submitting}
                     placeholder="此刻在想什么？输入 “- ”、“1. ” 或 “## ” 后会立即呈现 Markdown 样式…"
                   />
                 </div>
@@ -404,21 +459,24 @@ export default function InstantModeWindow() {
 
         <footer className="instant-submit-row">
           <div className="instant-shortcut">
-            <kbd>⌘</kbd><span>+</span><kbd>Enter</kbd>
+            <kbd>{platform === 'darwin' ? '⌘' : 'Ctrl'}</kbd><span>+</span><kbd>Enter</kbd>
           </div>
           <button
             className={`instant-submit ${submitting ? 'submitting' : ''}`}
             onClick={() => void submitCard()}
-            disabled={(!title.trim() && !content.trim()) || !selectedCanvasId || submitting}
-            title="创建卡片笔记"
+            disabled={editor.busy || submitting || (!editor.cardId && ((!title.trim() && !content.trim()) || !selectedCanvasId))}
+            title={editor.cardId ? '保存并完成编辑' : '创建卡片笔记'}
           >
-            <span>{submitting ? '正在投入' : '投入白板'}</span>
-            <svg width="25" height="25" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+            <span>{editor.cardId ? (editor.busy ? '正在保存' : '完成编辑') : (submitting ? '正在投入' : '投入白板')}</span>
+            <svg width="25" height="25" viewBox="0 0 28 28" fill="none" aria-hidden="true" style={editor.cardId ? { display: 'none' } : undefined}>
               <path d="M3.5 5.2L24.7 13.3L3.5 22.8L6.7 14.6L18.4 13.5L6.7 12.5L3.5 5.2Z" fill="currentColor" />
               <circle cx="6.2" cy="6.8" r="1.8" fill="var(--instant-submit-dot)" />
             </svg>
           </button>
         </footer>
+        {editor.cardId ? <p className="instant-editor-hint">修改自动保存到原笔记</p> : lastCreatedId && <div className="instant-created" role="status"><span>已投入「{findInstantNote({ canvases }, lastCreatedId)?.card.title || '无标题卡片'}」</span><button disabled={editor.busy || submitting} onClick={() => void editor.openCard(lastCreatedId)}>继续补充</button></div>}
+        </>}
+        {editor.error && <div className="instant-error" role="alert"><p>{editor.error}</p><div><button onClick={() => void (editor.cardId ? editor.flush() : submitCard())} disabled={editor.busy || submitting}>重试保存</button>{editor.cardId && <button onClick={() => void saveRecoveryCopy()} disabled={editor.busy || submitting}>另存为新笔记</button>}</div></div>}
       </section>
 
       {notice && (

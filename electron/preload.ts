@@ -9,7 +9,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   winMinimize: () => ipcRenderer.send('win-minimize'),
   winMaximize: () => ipcRenderer.send('win-maximize'),
   winClose: () => ipcRenderer.send('win-close'),
-  openInstantMode: () => ipcRenderer.invoke('instant-mode-open'),
+  openInstantMode: (cardId?: string) => ipcRenderer.invoke('instant-mode-open', cardId),
+  getInstantTarget: () => ipcRenderer.invoke('instant-mode-target'),
+  onInstantTarget: (cb: (target: any) => void) => {
+    const handler = (_e: any, target: any) => cb(target)
+    ipcRenderer.on('instant-mode-target', handler)
+    return () => ipcRenderer.removeListener('instant-mode-target', handler)
+  },
+  saveInstantCard: (request: any) => ipcRenderer.invoke('instant-card-save', request),
+  setInstantEditingCard: (id: string | null) => ipcRenderer.invoke('instant-editing-card', id),
+  getInstantEditingCard: () => ipcRenderer.invoke('instant-editing-card-get'),
+  onInstantEditingCardChanged: (cb: (id: string | null) => void) => {
+    const handler = (_e: any, id: string | null) => cb(id)
+    ipcRenderer.on('instant-editing-card', handler)
+    return () => ipcRenderer.removeListener('instant-editing-card', handler)
+  },
+  onInstantCloseRequested: (cb: () => void) => {
+    const handler = () => cb()
+    ipcRenderer.on('instant-close-requested', handler)
+    return () => ipcRenderer.removeListener('instant-close-requested', handler)
+  },
+  showCardInBoard: (id: string) => ipcRenderer.invoke('show-card-in-board', id),
+  onShowCardInBoard: (cb: (id: string) => void) => {
+    const handler = (_e: any, id: string) => cb(id)
+    ipcRenderer.on('show-card-in-board', handler)
+    return () => ipcRenderer.removeListener('show-card-in-board', handler)
+  },
   hideInstantMode: () => ipcRenderer.send('instant-mode-hide'),
   closeInstantMode: () => ipcRenderer.send('instant-mode-close'),
   setInstantAlwaysOnTop: (value: boolean) =>

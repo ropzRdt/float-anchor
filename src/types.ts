@@ -11,6 +11,18 @@ export interface Card {
   sourceId?: string
 }
 
+export interface InstantModeTarget { requestId: number; cardId: string | null }
+export interface InstantCardSave {
+  cardId: string
+  title: string
+  content: string
+  baseTitle: string
+  baseContent: string
+}
+export type InstantCardSaveResult =
+  | { success: true; card: Card; canvasId: string }
+  | { success: false; reason: 'deleted' | 'conflict' | 'error'; error: string }
+
 export interface CanvasLabel {
   id: string
   text: string
@@ -181,7 +193,16 @@ declare global {
       winMinimize: () => void
       winMaximize: () => void
       winClose: () => void
-      openInstantMode: () => Promise<boolean>
+      openInstantMode: (cardId?: string) => Promise<boolean>
+      getInstantTarget: () => Promise<InstantModeTarget | null>
+      onInstantTarget: (cb: (target: InstantModeTarget) => void) => () => void
+      saveInstantCard: (request: InstantCardSave) => Promise<InstantCardSaveResult>
+      setInstantEditingCard: (cardId: string | null) => Promise<void>
+      getInstantEditingCard: () => Promise<string | null>
+      onInstantEditingCardChanged: (cb: (cardId: string | null) => void) => () => void
+      onInstantCloseRequested: (cb: () => void) => () => void
+      showCardInBoard: (cardId: string) => Promise<void>
+      onShowCardInBoard: (cb: (cardId: string) => void) => () => void
       hideInstantMode: () => void
       closeInstantMode: () => void
       setInstantAlwaysOnTop: (value: boolean) => Promise<boolean>

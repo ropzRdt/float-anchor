@@ -215,6 +215,7 @@ interface AppState {
   journalViewMode: 'detail' | 'table'
   journalSelectedDate: string
   editingCardId: string | null
+  instantEditingCardId: string | null
   editingTextId: string | null
   highlightCardId: string | null
   loaded: boolean
@@ -227,6 +228,7 @@ interface AppState {
 
   loadData: () => Promise<void>
   persist: () => void
+  scheduleAutoSync: () => void
   loadSettings: () => Promise<void>
   saveSettings: (s: AppSettings) => Promise<void>
   setTheme: (theme: 'light' | 'dark') => void
@@ -323,6 +325,7 @@ export const useStore = create<AppState>((set, get) => ({
   journalViewMode: 'detail',
   journalSelectedDate: getTodayDateKey(),
   editingCardId: null,
+  instantEditingCardId: null,
   editingTextId: null,
   highlightCardId: null,
   loaded: false,
@@ -376,53 +379,61 @@ export const useStore = create<AppState>((set, get) => ({
   persist: () => {
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
-      const { canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate, settings, syncDecision } = get()
+      const { canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate } = get()
       void window.electronAPI.writeData({ canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate }).then((saved) => {
-        if (!saved) return
-        if (getEffectiveProvider(settings) !== 'none' && !syncDecision) {
-          set({ syncStatus: 'pending', syncError: null })
-          clearTimeout(syncTimer)
-          const sinceLast = Date.now() - lastRemoteUploadAt
-          const delay = Math.max(LOCAL_WEBDAV_SYNC_DELAY_MS, MIN_REMOTE_UPLOAD_INTERVAL_MS - sinceLast)
-          syncTimer = setTimeout(() => {
-            set({ syncStatus: 'syncing', syncError: null })
-            window.electronAPI.syncAuto().then(async (res) => {
-              if (!res.success) {
-                // 失败时不更新 lastRemoteUploadAt，使下次编辑可较快重试（delay 退化为 2s）
-                set({ syncStatus: 'error', syncError: res.error ?? '同步失败' })
-                return
-              }
-              if (res.action === 'needs-confirmation' && res.decision) {
-                set({
-                  syncStatus: 'warning',
-                  syncDecision: res.decision,
-                  showSettings: true,
-                })
-                return
-              }
-              if (res.action === 'downloaded' && res.data) {
-                await get().loadData()
-                get().refreshImageCache()
-              }
-              if (res.action === 'uploaded' || res.action === 'downloaded' || res.action === 'up-to-date') {
-                // 仅成功路径才更新节流时间戳
-                lastRemoteUploadAt = Date.now()
-                if (res.action !== 'up-to-date') {
-                  set({ syncStatus: 'success', syncDecision: null })
-                  setTimeout(() => {
-                    if (get().syncStatus === 'success') set({ syncStatus: 'idle' })
-                  }, 3000)
-                } else {
-                  set({ syncStatus: 'idle', syncDecision: null })
-                }
-                return
-              }
-              set({ syncStatus: 'idle', syncDecision: null })
-            }).catch(() => set({ syncStatus: 'error', syncError: '同步失败' }))
-          }, delay)
+        if (!saved) {
+          set({ syncStatus: 'error', syncError: '本地保存失败或内容已在其他窗口更新，当前编辑已保留。' })
+          return
         }
-      })
+        get().scheduleAutoSync()
+      }).catch(() => set({ syncStatus: 'error', syncError: '本地保存失败，当前编辑已保留。' }))
     }, 600)
+  },
+
+  scheduleAutoSync: () => {
+    const { settings, syncDecision } = get()
+    if (getEffectiveProvider(settings) !== 'none' && !syncDecision) {
+      set({ syncStatus: 'pending', syncError: null })
+      clearTimeout(syncTimer)
+      const sinceLast = Date.now() - lastRemoteUploadAt
+      const delay = Math.max(LOCAL_WEBDAV_SYNC_DELAY_MS, MIN_REMOTE_UPLOAD_INTERVAL_MS - sinceLast)
+      syncTimer = setTimeout(() => {
+        set({ syncStatus: 'syncing', syncError: null })
+        window.electronAPI.syncAuto().then(async (res) => {
+          if (!res.success) {
+            // 失败时不更新 lastRemoteUploadAt，使下次编辑可较快重试（delay 退化为 2s）
+            set({ syncStatus: 'error', syncError: res.error ?? '同步失败' })
+            return
+          }
+          if (res.action === 'needs-confirmation' && res.decision) {
+            set({
+              syncStatus: 'warning',
+              syncDecision: res.decision,
+              showSettings: true,
+            })
+            return
+          }
+          if (res.action === 'downloaded' && res.data) {
+            await get().loadData()
+            get().refreshImageCache()
+          }
+          if (res.action === 'uploaded' || res.action === 'downloaded' || res.action === 'up-to-date') {
+            // 仅成功路径才更新节流时间戳
+            lastRemoteUploadAt = Date.now()
+            if (res.action !== 'up-to-date') {
+              set({ syncStatus: 'success', syncDecision: null })
+              setTimeout(() => {
+                if (get().syncStatus === 'success') set({ syncStatus: 'idle' })
+              }, 3000)
+            } else {
+              set({ syncStatus: 'idle', syncDecision: null })
+            }
+            return
+          }
+          set({ syncStatus: 'idle', syncDecision: null })
+        }).catch(() => set({ syncStatus: 'error', syncError: '同步失败' }))
+      }, delay)
+    }
   },
 
   loadSettings: async () => {
@@ -467,7 +478,8 @@ export const useStore = create<AppState>((set, get) => ({
   flushPendingSave: async () => {
     clearTimeout(saveTimer)
     const { canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate } = get()
-    await window.electronAPI.writeData({ canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate })
+    const saved = await window.electronAPI.writeData({ canvases, activeCanvasId, boardViewMode, activeView, journal, journalViewMode, journalSelectedDate })
+    if (!saved) throw new Error('本地保存失败，请保留编辑内容后重试。')
   },
 
   addCanvas: (name) => {
@@ -714,6 +726,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   updateCard: (cardId, patch) => {
+    if (get().instantEditingCardId === cardId && ('title' in patch || 'content' in patch)) return
     const { activeCanvasId } = get()
     if (!activeCanvasId) return
     set((s) => ({
@@ -1010,7 +1023,10 @@ export const useStore = create<AppState>((set, get) => ({
     get().persist()
   },
 
-  setEditingCard: (cardId) => set({ editingCardId: cardId }),
+  setEditingCard: (cardId) => {
+    if (cardId && get().instantEditingCardId === cardId) return
+    set({ editingCardId: cardId })
+  },
 
   moveCardToCanvas: (cardId, targetCanvasId) => {
     const { activeCanvasId } = get()

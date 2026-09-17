@@ -1,0 +1,11 @@
+.preview-shell { height: 100%; background: var(--bg); }
+.preview-banner { height: 42px; display: flex; align-items: center; gap: 18px; padding: 0 20px; background: #26302d; color: #f8f7f2; font-size: 12px; }
+.preview-banner span { opacity: .75; }
+.preview-controls { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.preview-controls label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.preview-banner button { border: 1px solid #66b69c; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+.preview-board { display: block; border: 0; width: 100%; height: calc(100% - 42px); }
+.preview-floating { position: fixed; width: 430px; height: 560px; max-width: calc(100vw - 24px); max-height: calc(100vh - 66px); right: 24px; top: 54px; z-index: 10; border-radius: 15px; box-shadow: 0 12px 48px #0003; resize: both; overflow: hidden; }
+.preview-floating iframe { border: 0; width: 100%; height: 100%; display: block; }
+@media (max-width: 600px) { .preview-floating { right: 12px; } .preview-banner { gap: 8px; font-size: 10px; padding: 0 10px; } }
+@media (max-width: 800px) { .preview-banner > span { display: none; } .preview-controls { gap: 8px; } }

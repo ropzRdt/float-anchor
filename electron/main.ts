@@ -13,6 +13,14 @@ import { createWebDAVAdapter } from './sync/webdav-adapter'
 import { createGitHubAdapter } from './sync/github-adapter'
 import { initGitHubAuth, saveGitHubToken, readGitHubToken, clearGitHubToken, hasGitHubToken } from './sync/github-auth'
 import type { RemoteAdapter, LocalStore } from './sync/types'
+import type { AppData, InstantCardSave, InstantModeTarget } from '../src/types'
+import { applyInstantCardSave, findInstantNote } from '../src/lib/instantNotes'
+import { mergeAppData } from '../src/lib/mergeData'
+
+// Development previews never use the user's real notes or settings.
+if (!app.isPackaged && process.env.FLOAT_ANCHOR_PREVIEW_DIR) {
+  app.setPath('userData', path.resolve(process.env.FLOAT_ANCHOR_PREVIEW_DIR))
+}
 
 let dataDir = ''
 let dataFile = ''
@@ -30,6 +38,28 @@ function getDataPaths() {
 let mainWindow: BrowserWindow | null = null
 let instantWindow: BrowserWindow | null = null
 let isQuitting = false
+let instantTarget: InstantModeTarget | null = null
+let instantEditingCardId: string | null = null
+let allowInstantClose = false
+let instantRequestId = 0
+const rendererSnapshots = new Map<number, AppData>()
+
+function broadcastEditingCard(cardId: string | null) {
+  instantEditingCardId = cardId
+  mainWindow?.webContents.send('instant-editing-card', cardId)
+}
+
+function readAppData(): AppData | null {
+  const { dataFile: file } = getDataPaths()
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : null
+}
+
+function writeAppData(data: AppData) {
+  ensureDataDir()
+  const { dataFile: file } = getDataPaths()
+  fs.writeFileSync(file + '.tmp', JSON.stringify(data, null, 2), 'utf-8')
+  fs.renameSync(file + '.tmp', file)
+}
 
 const GITHUB_OWNER = 'swordrada'
 const GITHUB_REPO = 'float-anchor'
@@ -378,10 +408,12 @@ function restoreMainWindow() {
 }
 
 function createInstantWindow() {
+  mainWindow?.minimize()
   if (instantWindow && !instantWindow.isDestroyed()) {
     if (instantWindow.isMinimized()) instantWindow.restore()
     instantWindow.show()
     instantWindow.focus()
+    if (instantTarget) instantWindow.webContents.send('instant-mode-target', instantTarget)
     return
   }
 
@@ -429,13 +461,23 @@ function createInstantWindow() {
     }
   })
   instantWindow.webContents.once('did-fail-load', () => {
+    allowInstantClose = true
     instantWindow?.close()
   })
   instantWindow.once('ready-to-show', () => {
     instantWindow?.show()
     instantWindow?.focus()
   })
+  instantWindow.on('close', (event) => {
+    if (!allowInstantClose && !isQuitting) {
+      event.preventDefault()
+      instantWindow?.webContents.send('instant-close-requested')
+    }
+  })
   instantWindow.on('closed', () => {
+    allowInstantClose = false
+    instantTarget = null
+    broadcastEditingCard(null)
     instantWindow = null
     restoreMainWindow()
   })
@@ -458,49 +500,50 @@ function ensureDataDir() {
   }
 }
 
-ipcMain.handle('read-data', async () => {
+ipcMain.handle('read-data', (event) => {
   try {
-    const { dataFile: file } = getDataPaths()
-    ensureDataDir()
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf-8')
-      return JSON.parse(raw)
-    }
+    const data = readAppData()
+    if (data) rendererSnapshots.set(event.sender.id, data)
+    return data
   } catch (err) {
     console.error('Failed to read data:', err)
+    return null
   }
-  return null
 })
 
-ipcMain.handle('write-data', async (_event, data: unknown) => {
+ipcMain.handle('write-data', (event, incoming: AppData) => {
   try {
-    const { dataFile: file } = getDataPaths()
-    ensureDataDir()
-    const dataToWrite = (data && typeof data === 'object' && !Array.isArray(data))
-      ? { ...(data as Record<string, unknown>) }
-      : data
-
-    if (
-      dataToWrite &&
-      typeof dataToWrite === 'object' &&
-      !Array.isArray(dataToWrite) &&
-      typeof (dataToWrite as Record<string, unknown>)._syncTimestamp !== 'number' &&
-      fs.existsSync(file)
-    ) {
-      try {
-        const writableData = dataToWrite as Record<string, unknown>
-        const existing = JSON.parse(fs.readFileSync(file, 'utf-8'))
-        if (typeof existing?._syncTimestamp === 'number') {
-          writableData._syncTimestamp = existing._syncTimestamp
-        }
-      } catch {}
-    }
-
-    fs.writeFileSync(file, JSON.stringify(dataToWrite, null, 2), 'utf-8')
+    if (!incoming || !Array.isArray(incoming.canvases)) return false
+    const current = readAppData()
+    const base = rendererSnapshots.get(event.sender.id)
+    const merged = current && base ? mergeAppData(base, incoming, current) : incoming
+    writeAppData(merged)
+    // Baseline is what this renderer knows, not the merged snapshot it has never seen.
+    rendererSnapshots.set(event.sender.id, incoming)
     return true
   } catch (err) {
-    console.error('Failed to write data:', err)
+    console.error('Failed to save data:', err)
     return false
+  }
+})
+
+ipcMain.handle('instant-card-save', (event, request: InstantCardSave) => {
+  if (event.sender !== instantWindow?.webContents) return { success: false, reason: 'error', error: '请在即刻窗口中编辑。' }
+  try {
+    if (!request || ['cardId', 'title', 'content', 'baseTitle', 'baseContent'].some((key) => typeof (request as any)[key] !== 'string')) {
+      throw new Error('Invalid card update')
+    }
+    const current = readAppData()
+    if (!current) throw new Error('Missing local data')
+    const { data, result } = applyInstantCardSave(current, request)
+    if (result.success) {
+      writeAppData(data)
+      mainWindow?.webContents.send('instant-mode-data-changed')
+    }
+    return result
+  } catch (err) {
+    console.error('Failed to save instant card:', err)
+    return { success: false, reason: 'error', error: '保存失败，内容已保留，请重试。' }
   }
 })
 
@@ -992,13 +1035,28 @@ ipcMain.on('win-close', (e) => {
   BrowserWindow.fromWebContents(e.sender)?.close()
 })
 
-ipcMain.handle('instant-mode-open', () => {
+ipcMain.handle('instant-mode-open', (_event, cardId?: string) => {
+  if (cardId && !findInstantNote(readAppData() ?? { canvases: [] }, cardId)) return false
+  if (cardId || !instantWindow) instantTarget = { requestId: ++instantRequestId, cardId: cardId ?? null }
   createInstantWindow()
   return true
 })
 
 ipcMain.on('instant-mode-close', () => {
+  allowInstantClose = true
   instantWindow?.close()
+})
+
+ipcMain.handle('instant-mode-target', () => instantTarget)
+ipcMain.handle('instant-editing-card-get', () => instantEditingCardId)
+ipcMain.handle('instant-editing-card', (event, cardId: string | null) => {
+  if (event.sender === instantWindow?.webContents) broadcastEditingCard(cardId)
+})
+ipcMain.handle('show-card-in-board', (_event, cardId: string) => {
+  allowInstantClose = true
+  instantWindow?.close()
+  restoreMainWindow()
+  mainWindow?.webContents.send('show-card-in-board', cardId)
 })
 
 ipcMain.on('instant-mode-hide', (event) => {

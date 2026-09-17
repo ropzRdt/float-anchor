@@ -153,9 +153,30 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    return window.electronAPI.onInstantDataChanged(() => {
-      void useStore.getState().loadData()
+    let refresh = Promise.resolve()
+    const reload = () => {
+      refresh = refresh.then(async () => {
+        await useStore.getState().flushPendingSave()
+        await useStore.getState().loadData()
+        useStore.getState().scheduleAutoSync()
+      }).catch(() => useStore.getState().setSyncStatus('error', '本地内容尚未保存，请保留当前编辑。'))
+      return refresh
+    }
+    const offData = window.electronAPI.onInstantDataChanged(() => void reload())
+    const setInstantCard = (id: string | null) => useStore.setState({ instantEditingCardId: id })
+    void window.electronAPI.getInstantEditingCard().then(setInstantCard)
+    const offEditing = window.electronAPI.onInstantEditingCardChanged(setInstantCard)
+    const offNavigate = window.electronAPI.onShowCardInBoard((cardId) => {
+      void reload().then(() => {
+        const store = useStore.getState()
+        const canvas = store.canvases.find((c) => c.cards.some((card) => card.id === cardId))
+        if (!canvas) return
+        store.setActiveCanvas(canvas.id)
+        store.setHighlightCard(cardId)
+        requestAnimationFrame(() => requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('fa-fly-to-card', { detail: { cardId } }))))
+      })
     })
+    return () => { offData(); offEditing(); offNavigate() }
   }, [])
 
   if (!loaded) {

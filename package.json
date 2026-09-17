@@ -13,7 +13,8 @@
     "build:all": "npm run build && electron-builder --mac --win",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:preview": "vite --config vite.preview.config.ts"
   },
   "build": {
     "appId": "com.floatanchor.app",
