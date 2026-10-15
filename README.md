@@ -61,6 +61,8 @@
 
 ## 下载安装
 
+当前开发版本为 **`v1.0.23`（尚未发布）**，修复更新检测，并在检测失败时显示具体错误。
+
 当前稳定版为 [`v1.0.22`](https://github.com/swordrada/float-anchor/releases/tag/v1.0.22)，可在 [Releases](https://github.com/swordrada/float-anchor/releases) 页面下载：
 
 | 文件 | 平台 | 适用设备 |
