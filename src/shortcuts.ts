@@ -8,6 +8,7 @@ export interface ShortcutDef {
 }
 
 export const SHORTCUTS: ShortcutDef[] = [
+  { id: 'search', label: '搜索所有内容', mac: '⌘K', win: 'Ctrl+K' },
   { id: 'card', label: '新建卡片', mac: 'C', win: 'C' },
   { id: 'text', label: '新建文本', mac: 'T', win: 'T' },
   { id: 'section', label: '新建分区', mac: 'R', win: 'R' },

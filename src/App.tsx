@@ -5,6 +5,7 @@ import CanvasView from './components/CanvasView'
 import BoardOverviewView from './components/BoardOverviewView'
 import DailyJournalView from './components/DailyJournalView'
 import SettingsModal from './components/SettingsModal'
+import SearchModal from './components/SearchModal'
 import type { WebDAVSyncResult } from './types'
 
 const SIDEBAR_MIN = 180
@@ -21,9 +22,29 @@ export default function App() {
   const syncDecision = useStore((s) => s.syncDecision)
   const [platform, setPlatform] = useState<string>('darwin')
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT)
+  const [showSearch, setShowSearch] = useState(false)
+  const closeSearch = useCallback(() => setShowSearch(false), [])
+  const openSearch = useCallback(() => {
+    if (document.querySelector('[role="dialog"], .modal-overlay, .settings-overlay') || useStore.getState().showSettings) return
+    window.dispatchEvent(new Event('fa-before-search'))
+    setShowSearch(true)
+  }, [])
   const dragging = useRef(false)
   const backgroundSyncingRef = useRef(false)
   const backgroundStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+        if (event.isComposing || document.querySelector('[role="dialog"], .modal-overlay, .settings-overlay') || useStore.getState().showSettings) return
+        event.preventDefault()
+        event.stopPropagation()
+        openSearch()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [openSearch])
 
   const onResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -225,11 +246,12 @@ export default function App() {
       )}
 
       <div className="app-body">
-        <Sidebar width={sidebarWidth} />
+        <Sidebar width={sidebarWidth} onOpenSearch={openSearch} />
         <div className="sidebar-resize-handle" onMouseDown={onResizeStart} />
         {activeView === 'journal' ? <DailyJournalView /> : boardViewMode === 'overview' ? <BoardOverviewView /> : <CanvasView />}
       </div>
       {showSettings && <SettingsModal />}
+      {showSearch && <SearchModal onClose={closeSearch} />}
     </div>
   )
 }

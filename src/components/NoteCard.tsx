@@ -245,9 +245,12 @@ const NoteCard = React.memo(function NoteCard({ cardId, scale, highlight, select
       () => document.addEventListener('mousedown', handler),
       80,
     )
+    // Keyboard search can navigate before the normal debounced save fires.
+    window.addEventListener('fa-before-search', autoFitAndClose)
     return () => {
       clearTimeout(timer)
       document.removeEventListener('mousedown', handler)
+      window.removeEventListener('fa-before-search', autoFitAndClose)
     }
   }, [isEditing, autoFitAndClose])
 

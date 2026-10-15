@@ -39,6 +39,10 @@
 
 每日记为当天留出一块安静的写作空间：月历会用短标记显示已经记录的日子，点击任意日期即可补写或回顾。你可以快速切换前后日期，为记录添加标题和正文，并在回顾视图中按时间浏览过往内容的标题与摘要。
 
+### 全局搜索
+
+点击侧栏搜索框或放大镜，或按 `⌘K` / `Ctrl+K`，即可跨白板搜索白板、卡片、标题、文本、分区和每日记。输入时自动更新结果，通过 Type 筛选某一种内容；保留 Type 则搜索所有类型。结果按所属白板分组，匹配文字会高亮，单击或用上下方向键切换预览，双击、按回车或点击「打开」即可跳转到原内容。
+
 ### 即刻模式
 
 需要先把想法记下来时，可从侧栏切换到独立的「即刻模式」窗口。它会置顶显示一个专注的记录空间，支持 Markdown，按 `⌘ + Enter` / `Ctrl + Enter` 即可投入所选白板和分区；关闭窗口后会自动回到主界面。
@@ -57,13 +61,13 @@
 
 ## 下载安装
 
-当前稳定版为 [`v1.0.21`](https://github.com/swordrada/float-anchor/releases/tag/v1.0.21)，可在 [Releases](https://github.com/swordrada/float-anchor/releases) 页面下载：
+当前稳定版为 [`v1.0.22`](https://github.com/swordrada/float-anchor/releases/tag/v1.0.22)，可在 [Releases](https://github.com/swordrada/float-anchor/releases) 页面下载：
 
 | 文件 | 平台 | 适用设备 |
 |------|------|----------|
-| `FloatAnchor-1.0.21-mac-arm64.dmg` | macOS | Apple Silicon (M1/M2/M3/M4) |
-| `FloatAnchor-1.0.21-mac-x64.dmg` | macOS | Intel Mac |
-| `FloatAnchor-1.0.21-win-setup.exe` | Windows | 64 位 Windows |
+| `FloatAnchor-1.0.22-mac-arm64.dmg` | macOS | Apple Silicon (M1/M2/M3/M4) |
+| `FloatAnchor-1.0.22-mac-x64.dmg` | macOS | Intel Mac |
+| `FloatAnchor-1.0.22-win-setup.exe` | Windows | 64 位 Windows |
 
 ### macOS 安装
 
@@ -150,6 +154,7 @@
 
 | 操作 | macOS | Windows |
 |------|-------|---------|
+| 全局搜索 | `⌘K` | `Ctrl+K` |
 | 新建卡片 | `C` | `C` |
 | 新建文本 | `T` | `T` |
 | 新建分区 | `R` | `R` |
