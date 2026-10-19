@@ -286,6 +286,7 @@ interface AppState {
   finalizeCardMoves: (cardIds: string[]) => void
 
   addConnection: (fromCardId: string, toCardId: string, ports?: { fromSide: ConnectionSide; toSide: ConnectionSide }) => void
+  reconnectConnection: (connId: string, endpoint: 'from' | 'to', targetCardId: string, targetSide: ConnectionSide, fixedSide?: ConnectionSide) => void
   deleteConnection: (connId: string) => void
 
   saveViewport: (canvasId: string, viewport: CanvasViewport) => void
@@ -1732,6 +1733,36 @@ export const useStore = create<AppState>((set, get) => ({
           ? { ...c, connections: [...(c.connections ?? []), conn] }
           : c,
       ),
+    }))
+    get().persist()
+  },
+
+  reconnectConnection: (connId, endpoint, targetCardId, targetSide, fixedSide) => {
+    if ((endpoint !== 'from' && endpoint !== 'to') || !CONNECTION_SIDES.has(targetSide)) return
+    if (fixedSide !== undefined && !CONNECTION_SIDES.has(fixedSide)) return
+    const { activeCanvasId, canvases } = get()
+    const canvas = canvases.find((item) => item.id === activeCanvasId)
+    const connection = canvas?.connections?.find((item) => item.id === connId)
+    if (!canvas || !connection) return
+
+    const fixedCardId = endpoint === 'from' ? connection.toCardId : connection.fromCardId
+    if (targetCardId === fixedCardId || !canvas.cards.some((card) => card.id === targetCardId) ||
+        !canvas.cards.some((card) => card.id === fixedCardId)) return
+    const originalFixedSide = endpoint === 'from' ? connection.toSide : connection.fromSide
+    const resolvedFixedSide = originalFixedSide && CONNECTION_SIDES.has(originalFixedSide) ? originalFixedSide : fixedSide
+    if (!resolvedFixedSide) return
+
+    const next: Connection = endpoint === 'from'
+      ? { ...connection, fromCardId: targetCardId, fromSide: targetSide, toSide: resolvedFixedSide }
+      : { ...connection, toCardId: targetCardId, toSide: targetSide, fromSide: resolvedFixedSide }
+    const matchesPorts = (item: Connection) => item.fromCardId === next.fromCardId && item.toCardId === next.toCardId &&
+      item.fromSide === next.fromSide && item.toSide === next.toSide
+    if (matchesPorts(connection) || (canvas.connections ?? []).some((item) => item.id !== connId && matchesPorts(item))) return
+
+    set((s) => ({
+      canvases: s.canvases.map((item) => item.id === activeCanvasId
+        ? { ...item, connections: (item.connections ?? []).map((existing) => existing.id === connId ? next : existing) }
+        : item),
     }))
     get().persist()
   },

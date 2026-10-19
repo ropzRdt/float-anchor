@@ -16,6 +16,8 @@ export interface CardConnectionGeometry {
 
 type CardBounds = Pick<Card, 'x' | 'y' | 'width' | 'height'>
 type Bounds = Required<CardBounds>
+type ConnectionPorts = { fromSide?: ConnectionSide; toSide?: ConnectionSide }
+type ResolvedConnectionSides = { fromSide: ConnectionSide; toSide: ConnectionSide }
 
 function finite(value: number | undefined, fallback: number): number {
   if (value == null || !Number.isFinite(value)) return fallback
@@ -60,11 +62,11 @@ function distanceSquared(from: ConnectionPoint, to: ConnectionPoint): number {
   return (to.x - from.x) ** 2 + (to.y - from.y) ** 2
 }
 
-function connectBounds(
+function resolveBoundsSides(
   from: Bounds,
   to: Bounds,
-  ports?: { fromSide?: ConnectionSide; toSide?: ConnectionSide },
-): CardConnectionGeometry {
+  ports?: ConnectionPorts,
+): ResolvedConnectionSides {
   const fromCenter = { x: from.x + from.width / 2, y: from.y + from.height / 2 }
   const toCenter = { x: to.x + to.width / 2, y: to.y + to.height / 2 }
   const horizontalDirection = toCenter.x >= fromCenter.x ? 1 : -1
@@ -100,17 +102,33 @@ function connectBounds(
   const automaticToSide: ConnectionSide = horizontal
     ? horizontalDirection > 0 ? 'left' : 'right'
     : verticalDirection > 0 ? 'top' : 'bottom'
-  const fromSide = validSide(ports?.fromSide)
-  const toSide = validSide(ports?.toSide)
-  const start = pointOnSide(from, fromSide ?? automaticFromSide)
-  const end = pointOnSide(to, toSide ?? automaticToSide)
+  return {
+    fromSide: validSide(ports?.fromSide) ?? automaticFromSide,
+    toSide: validSide(ports?.toSide) ?? automaticToSide,
+  }
+}
+
+export function resolveCardConnectionSides(
+  from: CardBounds,
+  to: CardBounds,
+  ports?: ConnectionPorts,
+): ResolvedConnectionSides {
+  return resolveBoundsSides(normalizeBounds(from), normalizeBounds(to), ports)
+}
+
+function connectBounds(from: Bounds, to: Bounds, ports?: ConnectionPorts): CardConnectionGeometry {
+  const { fromSide, toSide } = resolveBoundsSides(from, to, ports)
+  const start = pointOnSide(from, fromSide)
+  const end = pointOnSide(to, toSide)
+  const hasFixedPort = validSide(ports?.fromSide) || validSide(ports?.toSide)
+  const horizontal = fromSide === 'left' || fromSide === 'right'
   // Fixed ports keep an outward tangent even for equal-axis or coincident ports.
   // Automatic records retain their original bend and route.
-  const bend = fromSide || toSide
+  const bend = hasFixedPort
     ? Math.max(24, Math.min(240, Math.hypot(end.x - start.x, end.y - start.y) * 0.4))
     : Math.abs(horizontal ? end.x - start.x : end.y - start.y) * 0.4
-  const fromNormal = SIDE_NORMALS[fromSide ?? automaticFromSide]
-  const toNormal = SIDE_NORMALS[toSide ?? automaticToSide]
+  const fromNormal = SIDE_NORMALS[fromSide]
+  const toNormal = SIDE_NORMALS[toSide]
   const control1 = { x: start.x + fromNormal.x * bend, y: start.y + fromNormal.y * bend }
   const control2 = { x: end.x + toNormal.x * bend, y: end.y + toNormal.y * bend }
   const midpoint = {
@@ -131,7 +149,7 @@ function connectBounds(
 export function getCardConnectionGeometry(
   from: CardBounds,
   to: CardBounds,
-  ports?: { fromSide?: ConnectionSide; toSide?: ConnectionSide },
+  ports?: ConnectionPorts,
 ): CardConnectionGeometry {
   return connectBounds(normalizeBounds(from), normalizeBounds(to), ports)
 }

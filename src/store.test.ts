@@ -860,6 +860,139 @@ describe('卡片连线只引用当前画布的有效卡片', () => {
   })
 })
 
+describe('拖动已有连线的端点', () => {
+  const originalPersist = useStore.getState().persist
+  const persist = vi.fn()
+  const mkCard = (id: string): Card => ({ id, title: '', content: '', x: 0, y: 0, width: 200, height: 150 })
+
+  beforeEach(() => {
+    persist.mockClear()
+    useStore.setState({
+      activeCanvasId: 'cv',
+      canvases: [
+        { id: 'cv', name: 'cv', cards: [mkCard('a'), mkCard('b'), mkCard('c')] },
+        { id: 'other', name: 'other', cards: [mkCard('other-card')] },
+      ],
+      persist,
+    })
+  })
+
+  afterEach(() => useStore.setState({ persist: originalPersist }))
+
+  const addOriginal = () => {
+    useStore.getState().addConnection('a', 'b', { fromSide: 'right', toSide: 'left' })
+    const connection = useStore.getState().canvases[0].connections![0]
+    persist.mockClear()
+    return connection
+  }
+
+  it.each(['from', 'to'] as const)('修改 %s 端点保留 ID、方向及固定端口，并原子保存一次', (endpoint) => {
+    const original = addOriginal()
+    const otherCanvas = useStore.getState().canvases[1]
+    const changes = vi.fn()
+    const unsubscribe = useStore.subscribe(changes)
+
+    useStore.getState().reconnectConnection(original.id, endpoint, 'c', 'top', 'bottom')
+
+    unsubscribe()
+    expect(useStore.getState().canvases[0].connections).toEqual([endpoint === 'from'
+      ? { ...original, fromCardId: 'c', fromSide: 'top' }
+      : { ...original, toCardId: 'c', toSide: 'top' }])
+    expect(useStore.getState().canvases[1]).toBe(otherCanvas)
+    expect(changes).toHaveBeenCalledTimes(1)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('可在原卡片上改换连接边，落回原端口则不修改或保存', () => {
+    const original = addOriginal()
+    const canvases = useStore.getState().canvases
+    useStore.getState().reconnectConnection(original.id, 'to', 'b', 'left')
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+
+    useStore.getState().reconnectConnection(original.id, 'to', 'b', 'bottom')
+    expect(useStore.getState().canvases[0].connections).toEqual([{ ...original, toSide: 'bottom' }])
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('完全重复的有向端口对拒绝修改，其他端口与反向连线仍可共存', () => {
+    const original = addOriginal()
+    useStore.getState().addConnection('a', 'c', { fromSide: 'right', toSide: 'top' })
+    useStore.getState().addConnection('c', 'a', { fromSide: 'bottom', toSide: 'right' })
+    const canvases = useStore.getState().canvases
+    const otherConnections = canvases[0].connections!.slice(1)
+    persist.mockClear()
+
+    useStore.getState().reconnectConnection(original.id, 'to', 'c', 'top')
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+
+    useStore.getState().reconnectConnection(original.id, 'to', 'c', 'bottom')
+    expect(useStore.getState().canvases[0].connections).toEqual([
+      { ...original, toCardId: 'c', toSide: 'bottom' },
+      ...otherConnections,
+    ])
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['from', 'to'] as const)('旧自动连线修改 %s 时采用调用方解析出的固定端口', (endpoint) => {
+    useStore.getState().addConnection('a', 'b')
+    const original = useStore.getState().canvases[0].connections![0]
+    persist.mockClear()
+
+    useStore.getState().reconnectConnection(original.id, endpoint, 'c', 'bottom', 'top')
+
+    expect(useStore.getState().canvases[0].connections).toEqual([endpoint === 'from'
+      ? { ...original, fromCardId: 'c', fromSide: 'bottom', toSide: 'top' }
+      : { ...original, toCardId: 'c', toSide: 'bottom', fromSide: 'top' }])
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('旧自动连线未提供固定端口时不猜测位置或修改数据', () => {
+    useStore.getState().addConnection('a', 'b')
+    const canvases = useStore.getState().canvases
+    const connection = canvases[0].connections![0]
+    persist.mockClear()
+    useStore.getState().reconnectConnection(connection.id, 'from', 'c', 'top')
+    useStore.getState().reconnectConnection(connection.id, 'to', 'c', 'top')
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('无效 ID、自连、跨画布目标和非法端口均保留原连线且不保存', () => {
+    const original = addOriginal()
+    const canvases = useStore.getState().canvases
+    const { reconnectConnection } = useStore.getState()
+    reconnectConnection('missing', 'to', 'c', 'top')
+    reconnectConnection(original.id, 'to', 'missing', 'top')
+    reconnectConnection(original.id, 'to', 'other-card', 'top')
+    reconnectConnection(original.id, 'to', 'a', 'top')
+    reconnectConnection(original.id, 'from', 'b', 'top')
+    reconnectConnection(original.id, 'invalid' as 'from', 'c', 'top')
+    reconnectConnection(original.id, 'to', 'c', 'center' as ConnectionSide)
+    reconnectConnection(original.id, 'to', 'c', 'top', 'center' as ConnectionSide)
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+
+    useStore.setState({ activeCanvasId: 'other' })
+    reconnectConnection(original.id, 'to', 'other-card', 'top')
+    useStore.setState({ activeCanvasId: null })
+    reconnectConnection(original.id, 'to', 'c', 'top')
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('固定端卡片已删除时拒绝重连，避免保存悬空引用', () => {
+    const original = addOriginal()
+    const canvas = useStore.getState().canvases[0]
+    useStore.setState({ canvases: [{ ...canvas, cards: canvas.cards.filter((card) => card.id !== 'a') }] })
+    const canvases = useStore.getState().canvases
+    useStore.getState().reconnectConnection(original.id, 'to', 'c', 'top')
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+})
+
 describe('方向键微移分区带动成员卡片（#4）', () => {
   const mkCard = (id: string, x: number, y: number): Card => ({ id, title: '', content: '', x, y, width: 200, height: 150 })
 

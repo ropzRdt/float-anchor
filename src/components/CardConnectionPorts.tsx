@@ -17,7 +17,7 @@ const sides: { side: ConnectionSide; label: string }[] = [
 interface Props {
   card: Card
   scale: number
-  selected: boolean
+  connectedSides?: Set<ConnectionSide>
   source?: CardPort
   target?: CardPort | null
   onStart: (event: PointerEvent<HTMLButtonElement>, port: CardPort) => void
@@ -25,10 +25,10 @@ interface Props {
   onCancel: () => void
 }
 
-export default function CardConnectionPorts({ card, scale, selected, source, target, onStart, onLostCapture, onCancel }: Props) {
+export default function CardConnectionPorts({ card, scale, connectedSides, source, target, onStart, onLostCapture, onCancel }: Props) {
   return (
     <div
-      className={`card-connection-ports${selected ? ' is-selected' : ''}${source ? ' is-connecting' : ''}`}
+      className="card-connection-ports"
       style={{
         left: card.x,
         top: card.y,
@@ -40,15 +40,16 @@ export default function CardConnectionPorts({ card, scale, selected, source, tar
       {sides.map(({ side, label }) => {
         const isSource = source?.cardId === card.id && source.side === side
         const isTarget = target?.cardId === card.id && target.side === side
+        const connected = connectedSides?.has(side)
         return (
           <button
             key={side}
             type="button"
-            className={`card-connection-port port-${side}${isSource ? ' is-source' : ''}${isTarget ? ' is-target' : ''}`}
+            className={`card-connection-port port-${side}${connected ? ' is-connected' : ''}${isSource ? ' is-source' : ''}${isTarget ? ' is-target' : ''}`}
             data-port-card-id={card.id}
             data-connection-side={side}
             aria-label={`${card.title || '无标题卡片'}：${label}侧连接点`}
-            title={`从${label}侧连接点拖到另一张卡片的连接点`}
+            title={connected ? `拖动修改${label}侧连接点的已有连线` : `从${label}侧连接点拖到另一张卡片的连接点`}
             tabIndex={-1}
             onPointerDown={(event) => onStart(event, { cardId: card.id, side })}
             onLostPointerCapture={(event) => onLostCapture(event.pointerId)}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCardConnectionGeometry, getCardConnectionPoint, getCardConnectionPreview } from './cardConnections'
+import { getCardConnectionGeometry, getCardConnectionPoint, getCardConnectionPreview, resolveCardConnectionSides } from './cardConnections'
 import type { CardConnectionGeometry, ConnectionPoint } from './cardConnections'
 import type { Card, ConnectionSide } from './types'
 
@@ -221,5 +221,50 @@ describe('fixed card connection ports', () => {
         expect(preview.path).not.toMatch(/NaN|Infinity/)
       }
     }
+  })
+})
+
+describe('resolveCardConnectionSides', () => {
+  it.each([
+    { from: card(0, 0), to: card(320, 20), fromSide: 'right', toSide: 'left' },
+    { from: card(320, 20), to: card(0, 0), fromSide: 'left', toSide: 'right' },
+    { from: card(0, 0), to: card(40, 260), fromSide: 'bottom', toSide: 'top' },
+    { from: card(40, 260), to: card(0, 0), fromSide: 'top', toSide: 'bottom' },
+  ])('旧自动连线解析为 $fromSide → $toSide，与渲染端点一致', ({ from, to, fromSide, toSide }) => {
+    const sides = resolveCardConnectionSides(from, to)
+    const geometry = getCardConnectionGeometry(from, to)
+    expect(sides).toEqual({ fromSide, toSide })
+    expect(geometry.start).toEqual(getCardConnectionPoint(from, sides.fromSide))
+    expect(geometry.end).toEqual(getCardConnectionPoint(to, sides.toSide))
+  })
+
+  it('显式端点覆盖自动结果，仅指定一端时保留另一端的自动选择', () => {
+    const from = card(0, 0)
+    const to = card(320, 20)
+    expect(resolveCardConnectionSides(from, to, { fromSide: 'top', toSide: 'bottom' })).toEqual({ fromSide: 'top', toSide: 'bottom' })
+    expect(resolveCardConnectionSides(from, to, { fromSide: 'top' })).toEqual({ fromSide: 'top', toSide: 'left' })
+    expect(resolveCardConnectionSides(from, to, { toSide: 'bottom' })).toEqual({ fromSide: 'right', toSide: 'bottom' })
+  })
+
+  it('卡片移动后重新识别自动端点，并保留已保存的固定端点', () => {
+    const from = card(0, 0)
+    expect(resolveCardConnectionSides(from, card(320, 20))).toEqual({ fromSide: 'right', toSide: 'left' })
+    expect(resolveCardConnectionSides(from, card(40, 260))).toEqual({ fromSide: 'bottom', toSide: 'top' })
+    expect(resolveCardConnectionSides(from, card(40, 260), { fromSide: 'right' })).toEqual({ fromSide: 'right', toSide: 'top' })
+    expect(resolveCardConnectionSides(from, card(-400, -300), { fromSide: 'right', toSide: 'left' })).toEqual({ fromSide: 'right', toSide: 'left' })
+  })
+
+  it('空参数和非法端点仍使用同一自动选择规则', () => {
+    const from = card(0, 0)
+    const to = card(320, 20)
+    expect(resolveCardConnectionSides(from, to, {})).toEqual({ fromSide: 'right', toSide: 'left' })
+    expect(resolveCardConnectionSides(from, to, { fromSide: 'invalid' as ConnectionSide, toSide: undefined })).toEqual({ fromSide: 'right', toSide: 'left' })
+  })
+
+  it('提取选边逻辑不会改变自动连线和固定端点连线的曲线', () => {
+    const from = card(0, 0)
+    const to = card(212, 0)
+    expect(getCardConnectionGeometry(from, to).path).toBe('M 200 60 C 204.8 60, 207.2 60, 212 60')
+    expect(getCardConnectionGeometry(from, to, { fromSide: 'right', toSide: 'left' }).path).toBe('M 200 60 C 224 60, 188 60, 212 60')
   })
 })

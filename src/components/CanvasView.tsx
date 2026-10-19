@@ -429,7 +429,7 @@ export default function CanvasView() {
     }
   }, [])
 
-  const portConnection = useCardPortConnection(meta?.id, cards, toCanvasCoords)
+  const portConnection = useCardPortConnection(meta?.id, cards, connections, toCanvasCoords)
 
   const viewportCenterCanvasCoords = useCallback(() => {
     const rect = viewportRef.current?.getBoundingClientRect()
@@ -823,7 +823,7 @@ export default function CanvasView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (portConnection.active.current) return
+      if (portConnection.active.current || portConnection.picker) return
       // 编辑输入上下文 / 确认弹窗打开 → 不处理全局快捷键
       const ae = document.activeElement as HTMLElement | null
       const typing = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
@@ -913,7 +913,7 @@ export default function CanvasView() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [connectingFrom, connections, deleteConnection, selection, confirmDelete, arrangeUnits, compactSection, addCard, addText, addSection, setEditingCard, setEditingText, nudgeUnits, zoomAroundCenter, resetZoomAroundCenter, viewportCenterCanvasCoords])
+  }, [connectingFrom, connections, deleteConnection, selection, confirmDelete, arrangeUnits, compactSection, addCard, addText, addSection, setEditingCard, setEditingText, nudgeUnits, zoomAroundCenter, resetZoomAroundCenter, viewportCenterCanvasCoords, portConnection.picker])
 
   useEffect(() => {
     if (!connectingFrom) {
@@ -1299,12 +1299,18 @@ export default function CanvasView() {
   const portPreview = useMemo(() => {
     const draft = portConnection.draft
     if (!draft || draft.canvasId !== meta?.id) return null
-    const source = cards.find((card) => card.id === draft.source.cardId)
-    if (!source) return null
+    const fixed = cards.find((card) => card.id === draft.fixed.cardId)
+    if (!fixed) return null
     const target = draft.target && cards.find((card) => card.id === draft.target?.cardId)
+    if (draft.reconnect?.endpoint === 'from') {
+      return getCardConnectionGeometry(target ?? { ...draft.pointer, width: 0, height: 0 }, fixed, {
+        fromSide: draft.target?.side ?? draft.source.side,
+        toSide: draft.fixed.side,
+      })
+    }
     return target && draft.target
-      ? getCardConnectionGeometry(source, target, { fromSide: draft.source.side, toSide: draft.target.side })
-      : getCardConnectionPreview(source, draft.pointer, draft.source.side)
+      ? getCardConnectionGeometry(fixed, target, { fromSide: draft.fixed.side, toSide: draft.target.side })
+      : getCardConnectionPreview(fixed, draft.pointer, draft.fixed.side)
   }, [portConnection.draft, meta?.id, cards])
 
   const selectedCardIds = [...selection.cardIds].filter((id) => cards.some((card) => card.id === id))
@@ -1404,7 +1410,7 @@ export default function CanvasView() {
                 />
               )
             })()}
-            {connectionPaths.map((conn) => (
+            {connectionPaths.filter((conn) => conn.id !== portConnection.draft?.reconnect?.connection.id).map((conn) => (
               <g key={conn.id} data-connection-id={conn.id}
                 data-from-card-id={conn.fromCardId} data-to-card-id={conn.toCardId}
                 data-from-side={conn.fromSide} data-to-side={conn.toSide}
@@ -1465,7 +1471,7 @@ export default function CanvasView() {
               key={card.id}
               card={card}
               scale={scaleVal.current}
-              selected={selection.cardIds.has(card.id)}
+              connectedSides={portConnection.connectedSides.get(card.id)}
               source={portConnection.draft?.source}
               target={portConnection.draft?.target}
               onStart={(event, port) => {
@@ -1501,11 +1507,13 @@ export default function CanvasView() {
 
         {portConnection.draft && (
           <div className="port-connection-hint" role="status">
-            {portConnection.draft.target ? '松开鼠标完成连线' : '拖到另一张卡片的连接点'} · Esc 取消
+            {portConnection.draft.reconnect
+              ? portConnection.draft.target ? '松开鼠标修改连线' : '拖到新的连接点，另一端保持不变'
+              : portConnection.draft.target ? '松开鼠标完成连线' : '拖到另一张卡片的连接点'} · Esc 取消
           </div>
         )}
 
-        {!portConnection.draft && !editingCardId && !editingTextId && (selectedCardIds.length > 0 || connectingFrom) && (
+        {!portConnection.draft && !portConnection.picker && !editingCardId && !editingTextId && (selectedCardIds.length > 0 || connectingFrom) && (
           <CanvasSelectionToolbar
             cardCount={selectedCardIds.length}
             connecting={!!connectingFrom}
@@ -1536,6 +1544,32 @@ export default function CanvasView() {
           </button>
         )}
       </div>
+
+      {portConnection.picker && (
+        <div
+          className="port-connection-picker"
+          role="dialog"
+          aria-label="选择要修改的连线"
+          style={{ left: portConnection.picker.x, top: portConnection.picker.y }}
+          onContextMenu={(event) => { event.preventDefault(); portConnection.cancel() }}
+        >
+          <p>此点有多条连线，按住一条拖到新的连接点</p>
+          <div className="port-connection-picker-list">
+            {portConnection.picker.choices.map((choice) => (
+              <button
+                key={choice.connection.id}
+                type="button"
+                onMouseEnter={() => setHoveredConn(choice.connection.id)}
+                onMouseLeave={() => setHoveredConn(null)}
+                onPointerDown={(event) => { setHoveredConn(null); portConnection.pick(event, choice) }}
+                onClick={(event) => event.preventDefault()}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {ctxMenu && (
         <ContextMenu

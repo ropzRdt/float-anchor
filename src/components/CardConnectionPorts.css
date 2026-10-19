@@ -8,8 +8,8 @@
   position: absolute;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -27,7 +27,7 @@
   border: 1.5px solid var(--accent);
   border-radius: 50%;
   background: var(--card-bg);
-  opacity: 0.65;
+  opacity: 0;
   transition: transform 0.12s, opacity 0.12s, background 0.12s, box-shadow 0.12s;
 }
 
@@ -36,9 +36,8 @@
 .port-bottom { left: 50%; top: 100%; }
 .port-left { left: 0; top: 50%; }
 
-.card-connection-ports.is-selected .card-connection-port span,
-.card-connection-ports.is-connecting .card-connection-port span,
-.card-connection-port:hover span {
+.card-connection-port:hover span,
+.card-connection-port.is-source span {
   opacity: 1;
 }
 
@@ -54,6 +53,42 @@
   transform: scale(1.5);
   box-shadow: 0 0 0 4px var(--accent-light);
 }
+
+.card-connection-port.is-connected { cursor: grab; }
+.card-connection-port.is-source { cursor: grabbing; }
+
+.port-connection-picker {
+  position: fixed;
+  z-index: 1100;
+  width: 248px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  box-shadow: var(--shadow-md);
+}
+
+.port-connection-picker p {
+  margin: 2px 4px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.port-connection-picker-list { max-height: 220px; overflow: auto; }
+.port-connection-picker button {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 12px;
+  cursor: grab;
+  touch-action: none;
+}
+.port-connection-picker button:hover { background: var(--accent-light); }
 
 .canvas-viewport.port-connecting,
 .canvas-viewport.port-connecting .note-card {

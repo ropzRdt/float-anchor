@@ -1,67 +1,139 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useStore } from '../store'
-import type { Card, ConnectionSide } from '../types'
+import type { Card, Connection, ConnectionSide } from '../types'
 import type { CardPort } from './CardConnectionPorts'
+import { resolveCardConnectionSides } from '../cardConnections'
 import type { ConnectionPoint } from '../cardConnections'
+
+interface Reconnection {
+  connection: Connection
+  endpoint: 'from' | 'to'
+  fixed: CardPort
+  label: string
+}
 
 interface PortConnectionDraft {
   canvasId: string
   source: CardPort
+  fixed: CardPort
+  reconnect?: Reconnection
   target: CardPort | null
   pointer: ConnectionPoint
 }
 
-interface ActiveDrag {
-  canvasId: string
-  source: CardPort
+interface ActiveDrag extends Omit<PortConnectionDraft, 'target' | 'pointer'> {
   pointerId: number
   element: HTMLButtonElement
 }
 
-function targetAtPoint(x: number, y: number, source: CardPort): CardPort | null {
+interface ConnectionPicker {
+  source: CardPort
+  element: HTMLButtonElement
+  choices: Reconnection[]
+  x: number
+  y: number
+}
+
+const sideLabels: Record<ConnectionSide, string> = { top: '上', right: '右', bottom: '下', left: '左' }
+const portKey = (port: CardPort) => `${port.cardId}/${port.side}`
+
+function targetAtPoint(x: number, y: number, fixed: CardPort): CardPort | null {
   const element = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-port-card-id][data-connection-side]')
   const cardId = element?.dataset.portCardId
   const side = element?.dataset.connectionSide as ConnectionSide | undefined
-  if (!cardId || cardId === source.cardId || !side || !['top', 'right', 'bottom', 'left'].includes(side)) return null
+  if (!cardId || cardId === fixed.cardId || !side || !['top', 'right', 'bottom', 'left'].includes(side)) return null
   return { cardId, side }
+}
+
+function unchangedConnection(a: Connection, b?: Connection) {
+  return b && a.fromCardId === b.fromCardId && a.toCardId === b.toCardId && a.fromSide === b.fromSide && a.toSide === b.toSide
 }
 
 export function useCardPortConnection(
   canvasId: string | undefined,
   cards: Card[],
+  connections: Connection[],
   toCanvasCoords: (x: number, y: number) => ConnectionPoint,
 ) {
   const [draft, setDraft] = useState<PortConnectionDraft | null>(null)
+  const [picker, setPicker] = useState<ConnectionPicker | null>(null)
   const active = useRef<ActiveDrag | null>(null)
+  const pickerRef = useRef<ConnectionPicker | null>(null)
+  const closePicker = useCallback(() => { pickerRef.current = null; setPicker(null) }, [])
+
+  const { choicesByPort, connectedSides } = useMemo(() => {
+    const cardMap = new Map(cards.map((card) => [card.id, card]))
+    const choicesByPort = new Map<string, Reconnection[]>()
+    const connectedSides = new Map<string, Set<ConnectionSide>>()
+    for (const connection of connections) {
+      const from = cardMap.get(connection.fromCardId)
+      const to = cardMap.get(connection.toCardId)
+      if (!from || !to) continue
+      const sides = resolveCardConnectionSides(from, to, connection)
+      for (const endpoint of ['from', 'to'] as const) {
+        const source = { cardId: endpoint === 'from' ? from.id : to.id, side: endpoint === 'from' ? sides.fromSide : sides.toSide }
+        const fixed = { cardId: endpoint === 'from' ? to.id : from.id, side: endpoint === 'from' ? sides.toSide : sides.fromSide }
+        const other = endpoint === 'from' ? to : from
+        const choice = { connection, endpoint, fixed, label: `${endpoint === 'from' ? '连向' : '来自'}「${other.title || '无标题卡片'}」${sideLabels[fixed.side]}侧` }
+        const key = portKey(source)
+        choicesByPort.set(key, [...(choicesByPort.get(key) ?? []), choice])
+        const occupied = connectedSides.get(source.cardId) ?? new Set<ConnectionSide>()
+        occupied.add(source.side)
+        connectedSides.set(source.cardId, occupied)
+      }
+    }
+    return { choicesByPort, connectedSides }
+  }, [cards, connections])
 
   const cancel = useCallback(() => {
     const drag = active.current
-    if (!drag) return
     active.current = null
-    if (drag.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId)
+    if (drag?.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId)
     setDraft(null)
-  }, [])
+    closePicker()
+  }, [closePicker])
 
-  const start = useCallback((event: ReactPointerEvent<HTMLButtonElement>, source: CardPort) => {
-    if (event.button !== 0 || !event.isPrimary || !canvasId) return
+  const begin = useCallback((event: ReactPointerEvent<HTMLButtonElement>, source: CardPort, element: HTMLButtonElement, reconnect?: Reconnection) => {
+    if (event.button !== 0 || !event.isPrimary || !canvasId || !element.isConnected) return
     event.preventDefault()
     event.stopPropagation()
     cancel()
-    const element = event.currentTarget
-    active.current = { canvasId, source, pointerId: event.pointerId, element }
+    const fixed = reconnect?.fixed ?? source
+    active.current = { canvasId, source, fixed, reconnect, pointerId: event.pointerId, element }
+    // The port stays mounted when a connection is picked; the menu item does not.
     element.setPointerCapture(event.pointerId)
-    setDraft({ canvasId, source, target: null, pointer: toCanvasCoords(event.clientX, event.clientY) })
+    setDraft({ canvasId, source, fixed, reconnect, target: null, pointer: toCanvasCoords(event.clientX, event.clientY) })
   }, [canvasId, cancel, toCanvasCoords])
+
+  const start = useCallback((event: ReactPointerEvent<HTMLButtonElement>, source: CardPort) => {
+    if (event.button !== 0 || !event.isPrimary || !canvasId) return
+    const choices = choicesByPort.get(portKey(source)) ?? []
+    if (choices.length <= 1) { begin(event, source, event.currentTarget, choices[0]); return }
+    event.preventDefault()
+    event.stopPropagation()
+    cancel()
+    const next = { source, element: event.currentTarget, choices, x: Math.max(8, Math.min(event.clientX + 12, window.innerWidth - 272)), y: Math.max(8, Math.min(event.clientY + 12, window.innerHeight - 290)) }
+    pickerRef.current = next
+    setPicker(next)
+  }, [canvasId, choicesByPort, begin, cancel])
+
+  const pick = useCallback((event: ReactPointerEvent<HTMLButtonElement>, choice: Reconnection) => {
+    const menu = pickerRef.current
+    if (menu) begin(event, menu.source, menu.element, choice)
+  }, [begin])
 
   const lostCapture = useCallback((pointerId: number) => {
     if (active.current?.pointerId === pointerId) cancel()
   }, [cancel])
 
+  useEffect(() => { cancel() }, [canvasId, cancel])
   useEffect(() => {
     const drag = active.current
-    if (drag && (drag.canvasId !== canvasId || !cards.some((card) => card.id === drag.source.cardId))) cancel()
-  }, [canvasId, cards, cancel])
+    if (drag && (!cards.some((card) => card.id === drag.source.cardId) || !cards.some((card) => card.id === drag.fixed.cardId) ||
+      (drag.reconnect && !unchangedConnection(drag.reconnect.connection, connections.find((conn) => conn.id === drag.reconnect?.connection.id))))) cancel()
+    if (pickerRef.current) closePicker()
+  }, [cards, connections, cancel, closePicker])
 
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
@@ -69,38 +141,42 @@ export function useCardPortConnection(
       if (!drag || event.pointerId !== drag.pointerId) return
       if (event.buttons === 0) { cancel(); return }
       event.preventDefault()
-      setDraft({
-        canvasId: drag.canvasId,
-        source: drag.source,
-        target: targetAtPoint(event.clientX, event.clientY, drag.source),
-        pointer: toCanvasCoords(event.clientX, event.clientY),
-      })
+      setDraft({ ...drag, target: targetAtPoint(event.clientX, event.clientY, drag.fixed), pointer: toCanvasCoords(event.clientX, event.clientY) })
     }
     const onUp = (event: PointerEvent) => {
       const drag = active.current
       if (!drag || event.pointerId !== drag.pointerId || event.button !== 0) return
-      const target = targetAtPoint(event.clientX, event.clientY, drag.source)
+      const target = targetAtPoint(event.clientX, event.clientY, drag.fixed)
       const store = useStore.getState()
       if (target && store.activeCanvasId === drag.canvasId) {
-        store.addConnection(drag.source.cardId, target.cardId, { fromSide: drag.source.side, toSide: target.side })
+        if (drag.reconnect) {
+          const current = store.canvases.find((canvas) => canvas.id === drag.canvasId)?.connections?.find((conn) => conn.id === drag.reconnect?.connection.id)
+          if (unchangedConnection(drag.reconnect.connection, current) && portKey(target) !== portKey(drag.source)) {
+            store.reconnectConnection(drag.reconnect.connection.id, drag.reconnect.endpoint, target.cardId, target.side, drag.fixed.side)
+          }
+        } else {
+          store.addConnection(drag.source.cardId, target.cardId, { fromSide: drag.source.side, toSide: target.side })
+        }
       }
       cancel()
     }
-    const onCancel = (event: PointerEvent) => {
-      if (event.pointerId === active.current?.pointerId) cancel()
-    }
+    const onCancel = (event: PointerEvent) => { if (event.pointerId === active.current?.pointerId) cancel() }
     const onKey = (event: KeyboardEvent) => {
-      if (!active.current || event.key !== 'Escape') return
+      if ((!active.current && !pickerRef.current) || event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
       cancel()
     }
+    const onDown = (event: PointerEvent) => {
+      if (!(event.target as Element).closest('.port-connection-picker')) closePicker()
+    }
     const onWheel = (event: WheelEvent) => {
+      if (!(event.target as Element).closest('.port-connection-picker')) closePicker()
       if (!active.current) return
-      // Keep port hit targets still until the pointer gesture finishes.
       event.preventDefault()
       event.stopPropagation()
     }
+    document.addEventListener('pointerdown', onDown, true)
     document.addEventListener('pointermove', onMove, { passive: false })
     document.addEventListener('pointerup', onUp)
     document.addEventListener('pointercancel', onCancel)
@@ -109,6 +185,7 @@ export function useCardPortConnection(
     window.addEventListener('blur', cancel)
     window.addEventListener('fa-before-search', cancel)
     return () => {
+      document.removeEventListener('pointerdown', onDown, true)
       document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerup', onUp)
       document.removeEventListener('pointercancel', onCancel)
@@ -120,7 +197,7 @@ export function useCardPortConnection(
       active.current = null
       if (drag?.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId)
     }
-  }, [cancel, toCanvasCoords])
+  }, [cancel, closePicker, toCanvasCoords])
 
-  return { draft, active, start, cancel, lostCapture }
+  return { draft, active, start, cancel, lostCapture, connectedSides, picker, pick }
 }
