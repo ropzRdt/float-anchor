@@ -1,4 +1,4 @@
-import { useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import type { Connection } from '../types'
@@ -23,6 +23,19 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
   const markerId = `connection-arrow-${useId().replace(/:/g, '')}`
   const appearance = getConnectionAppearance(connection)
   const labelBeforeEditing = useRef(appearance.label)
+  const [isEditingLabel, setIsEditingLabel] = useState(false)
+  const labelInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!selected) setIsEditingLabel(false)
+  }, [selected])
+
+  useEffect(() => {
+    if (selected && isEditingLabel) {
+      labelInputRef.current?.focus({ preventScroll: true })
+      labelInputRef.current?.select()
+    }
+  }, [selected, isEditingLabel])
   const inverseScale = 1 / Math.max(0.15, scale)
   const markerSize = 10 + appearance.strokeWidth
   const hasStart = appearance.arrow === 'start' || appearance.arrow === 'both'
@@ -96,8 +109,9 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
           height={30 * inverseScale}
         >
           <div className="connection-label-position" style={{ transform: `scale(${inverseScale})` }}>
-            {selected ? (
+            {selected && isEditingLabel ? (
               <input
+                ref={labelInputRef}
                 className="connection-label connection-label-input"
                 data-connection-label-id={connection.id}
                 aria-label="连线文字"
@@ -106,7 +120,7 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
                 maxLength={200}
                 value={appearance.label}
                 style={{ width: Math.min(260, Math.max(104, appearance.label.length * 12 + 24)) }}
-                onFocus={() => { labelBeforeEditing.current = appearance.label }}
+                onBlur={() => setIsEditingLabel(false)}
                 onChange={(event) => onLabelChange(event.target.value.replace(/[\r\n\u2028\u2029]+/g, ' ').slice(0, 200))}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -127,7 +141,35 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
                 }}
               />
             ) : (
-              <span className="connection-label" data-connection-label-id={connection.id} title={appearance.label}>{appearance.label}</span>
+              <>
+                {appearance.label && (
+                  <span className={`connection-label${selected ? ' has-edit-button' : ''}`} data-connection-label-id={connection.id} title={appearance.label}>{appearance.label}</span>
+                )}
+                {selected && (
+                  <button
+                    type="button"
+                    className="connection-label-edit"
+                    data-connection-label-edit={connection.id}
+                    aria-label={appearance.label ? '编辑连线文字' : '添加连线文字'}
+                    title={appearance.label ? '编辑文字' : '添加文字'}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      labelBeforeEditing.current = appearance.label
+                      setIsEditingLabel(true)
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                      <path d="M4 5V3.5h12V5M10 3.5v13M7 16.5h6" />
+                    </svg>
+                  </button>
+                )}
+              </>
             )}
           </div>
         </foreignObject>,

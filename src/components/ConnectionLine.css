@@ -39,6 +39,7 @@
 }
 .connection-label-layer.is-editing { z-index: 0; }
 .connection-label-layer.is-editing .connection-label { pointer-events: none; }
+.connection-label-layer.is-editing .connection-label-edit { pointer-events: none; }
 
 .connection-label-position {
   width: 260px;
@@ -46,6 +47,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
+  gap: 5px;
   transform-origin: 0 0;
   pointer-events: none;
 }
@@ -84,3 +86,33 @@
 
 .connection-label-input::placeholder { color: var(--text-muted); }
 .connection-label-input:focus { box-shadow: 0 0 0 2px var(--accent-light); }
+
+.connection-label.has-edit-button { max-width: 227px; }
+
+.connection-label-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--accent);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.connection-label-edit:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.connection-label-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
