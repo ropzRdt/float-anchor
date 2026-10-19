@@ -5,10 +5,10 @@
   z-index: 120;
   width: max-content;
   max-width: calc(100% - 24px);
-  padding: 8px 10px;
+  padding: 6px 8px;
   transform: translateX(-50%);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--card-bg);
   color: var(--text-primary);
   box-shadow: var(--shadow-lg);
@@ -46,8 +46,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-.connection-toolbar-field,
-.connection-toolbar-text-field {
+.connection-toolbar-field {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -56,13 +55,11 @@
   font-size: 12px;
 }
 
-.connection-toolbar-field > span,
-.connection-toolbar-text-field > span {
+.connection-toolbar-field > span {
   flex-shrink: 0;
 }
 
-.connection-toolbar-field select,
-.connection-toolbar-text-field input {
+.connection-toolbar-field select {
   min-height: 32px;
   min-width: 0;
   padding: 5px 7px;
@@ -76,17 +73,6 @@
 
 .connection-toolbar-field select {
   cursor: pointer;
-}
-
-.connection-toolbar-text-field input {
-  flex: 1;
-  width: 100%;
-  user-select: text;
-}
-
-.connection-toolbar-text-field input::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.8;
 }
 
 .connection-toolbar-button {
@@ -113,11 +99,6 @@
   color: var(--accent);
 }
 
-.connection-toolbar-button.is-primary:not(:disabled) {
-  background: var(--accent-light);
-  color: var(--accent);
-}
-
 .connection-toolbar-button.is-danger:hover {
   color: var(--danger);
   background: var(--sidebar-hover);
@@ -129,38 +110,7 @@
 }
 
 .connection-toolbar-button:focus-visible,
-.connection-toolbar-field select:focus-visible,
-.connection-toolbar-text-field input:focus-visible {
+.connection-toolbar-field select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-}
-
-.connection-toolbar-text-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 7px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.connection-toolbar-text-field {
-  flex: 1 1 220px;
-}
-
-.connection-toolbar-text-count {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-
-.connection-toolbar-hint {
-  margin-top: 6px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: center;
-  overflow-wrap: anywhere;
 }

@@ -1,5 +1,4 @@
 import type { MouseEvent } from 'react'
-import { IS_MAC } from '../shortcuts'
 import './CanvasSelectionToolbar.css'
 
 interface Props {
@@ -109,13 +108,6 @@ export default function CanvasSelectionToolbar({
             <span>{connecting ? '取消连线' : '取消选择'}</span>
           </button>
         </div>
-      </div>
-      <div className="selection-toolbar-hints">
-        {connecting && (
-          <span className="selection-toolbar-mode-hint" role="status">点击目标卡片 · Esc 取消</span>
-        )}
-        {!connecting && cardCount > 2 && <span>连线时请选择 1 或 2 张卡片</span>}
-        <span><kbd>{IS_MAC ? '⌘' : 'Ctrl'}</kbd> / <kbd>Shift</kbd> + 点击多选</span>
       </div>
     </div>
   )

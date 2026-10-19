@@ -71,3 +71,16 @@
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.connection-label-input {
+  box-sizing: border-box;
+  height: 30px;
+  min-width: 104px;
+  outline: none;
+  text-align: center;
+  user-select: text;
+  cursor: text;
+}
+
+.connection-label-input::placeholder { color: var(--text-muted); }
+.connection-label-input:focus { box-shadow: 0 0 0 2px var(--accent-light); }

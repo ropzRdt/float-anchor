@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import type { Connection } from '../types'
@@ -16,11 +16,13 @@ interface Props {
   toTitle: string
   onSelect: (event: MouseEvent<SVGGElement> | KeyboardEvent<SVGGElement>) => void
   onHover: (hovered: boolean) => void
+  onLabelChange: (label: string) => void
 }
 
-export default function ConnectionLine({ connection, selected, highlighted, scale, labelLayer, fromTitle, toTitle, onSelect, onHover }: Props) {
+export default function ConnectionLine({ connection, selected, highlighted, scale, labelLayer, fromTitle, toTitle, onSelect, onHover, onLabelChange }: Props) {
   const markerId = `connection-arrow-${useId().replace(/:/g, '')}`
   const appearance = getConnectionAppearance(connection)
+  const labelBeforeEditing = useRef(appearance.label)
   const inverseScale = 1 / Math.max(0.15, scale)
   const markerSize = 10 + appearance.strokeWidth
   const hasStart = appearance.arrow === 'start' || appearance.arrow === 'both'
@@ -85,7 +87,7 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
         markerEnd={hasEnd ? `url(#${markerId})` : undefined}
         vectorEffect="non-scaling-stroke"
       />
-      {appearance.label && labelLayer && createPortal(
+      {(selected || appearance.label) && labelLayer && createPortal(
         <foreignObject
           className={`connection-label-container${selected ? ' is-selected' : ''}`}
           x={connection.midpoint.x - 130 * inverseScale}
@@ -94,7 +96,39 @@ export default function ConnectionLine({ connection, selected, highlighted, scal
           height={30 * inverseScale}
         >
           <div className="connection-label-position" style={{ transform: `scale(${inverseScale})` }}>
-            <span className="connection-label" data-connection-label-id={connection.id} title={appearance.label}>{appearance.label}</span>
+            {selected ? (
+              <input
+                className="connection-label connection-label-input"
+                data-connection-label-id={connection.id}
+                aria-label="连线文字"
+                title={`${fromTitle} 与 ${toTitle} 的连线文字`}
+                placeholder="添加文字"
+                maxLength={200}
+                value={appearance.label}
+                style={{ width: Math.min(260, Math.max(104, appearance.label.length * 12 + 24)) }}
+                onFocus={() => { labelBeforeEditing.current = appearance.label }}
+                onChange={(event) => onLabelChange(event.target.value.replace(/[\r\n\u2028\u2029]+/g, ' ').slice(0, 200))}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onContextMenu={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                  event.stopPropagation()
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) return
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    event.currentTarget.blur()
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault()
+                    onLabelChange(labelBeforeEditing.current)
+                    event.currentTarget.blur()
+                  }
+                }}
+              />
+            ) : (
+              <span className="connection-label" data-connection-label-id={connection.id} title={appearance.label}>{appearance.label}</span>
+            )}
           </div>
         </foreignObject>,
         labelLayer,

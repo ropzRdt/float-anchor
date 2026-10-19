@@ -1505,6 +1505,7 @@ export default function CanvasView() {
                 toTitle={cardTitles.get(conn.toCardId) ?? '无标题卡片'}
                 onSelect={(event) => handleConnectionSelect(event, conn.id)}
                 onHover={(hovered) => setHoveredConn((current) => hovered ? conn.id : current === conn.id ? null : current)}
+                onLabelChange={(label) => updateConnections([conn.id], { label })}
               />
             ))}
           </svg>

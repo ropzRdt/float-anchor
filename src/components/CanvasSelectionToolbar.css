@@ -5,10 +5,10 @@
   z-index: 120;
   width: max-content;
   max-width: calc(100% - 24px);
-  padding: 8px 10px 7px;
+  padding: 6px 8px;
   transform: translateX(-50%);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--card-bg);
   color: var(--text-primary);
   box-shadow: var(--shadow-lg);
@@ -89,32 +89,6 @@
 
 .selection-toolbar-clear {
   color: var(--text-secondary);
-}
-
-.selection-toolbar-hints {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 3px 14px;
-  margin-top: 5px;
-  padding: 6px 4px 0;
-  border-top: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.5;
-  text-align: center;
-  overflow-wrap: anywhere;
-}
-
-.selection-toolbar-hints kbd {
-  font: inherit;
-  font-weight: 500;
-}
-
-.selection-toolbar-mode-hint {
-  color: var(--accent);
-  font-weight: 500;
 }
 
 .canvas-selection-toolbar.is-connecting {
