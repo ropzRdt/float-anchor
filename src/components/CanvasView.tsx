@@ -8,6 +8,7 @@ import ContextMenu from './ContextMenu'
 import MoveToModal from './MoveToModal'
 import ConfirmModal from './ConfirmModal'
 import CanvasSelectionToolbar from './CanvasSelectionToolbar'
+import SectionSelectionToolbar from './SectionSelectionToolbar'
 import ConnectionSelectionToolbar from './ConnectionSelectionToolbar'
 import ConnectionLine from './ConnectionLine'
 import CardConnectionPorts from './CardConnectionPorts'
@@ -198,6 +199,7 @@ export default function CanvasView() {
   const nudgeUnits = useStore((s) => s.nudgeUnits)
   const setEditingText = useStore((s) => s.setEditingText)
   const addSection = useStore((s) => s.addSection)
+  const updateSections = useStore((s) => s.updateSections)
   const createSectionFromCards = useStore((s) => s.createSectionFromCards)
   const editingCardId = useStore((s) => s.editingCardId)
   const editingTextId = useStore((s) => s.editingTextId)
@@ -404,7 +406,7 @@ export default function CanvasView() {
 
     const onWheel = (e: WheelEvent) => {
       const t = e.target as HTMLElement
-      if (t.closest('.connection-selection-toolbar')) return
+      if (t.closest('.connection-selection-toolbar, .section-selection-toolbar')) return
       if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT') return
       if (!e.ctrlKey && !e.metaKey && t.closest('.rich-editor-wrap')) return
       e.preventDefault()
@@ -619,7 +621,7 @@ export default function CanvasView() {
     if (portConnection.active.current) { e.preventDefault(); return }
     if (e.defaultPrevented) return
     const target = e.target as HTMLElement
-    if (target.closest('a, button, input, textarea, select, [contenteditable], .note-card.editing, .card-resize-handle, .section-resize-handle, .text-resize-handle, .canvas-selection-toolbar, .connection-selection-toolbar')) return
+    if (target.closest('a, button, input, textarea, select, [contenteditable], .note-card.editing, .card-resize-handle, .section-resize-handle, .text-resize-handle, .canvas-selection-toolbar, .connection-selection-toolbar, .section-selection-toolbar')) return
     if (e.button === 0 && target.closest('[data-connection-id]')) return
     if (e.button === 1) {
       e.preventDefault()
@@ -892,7 +894,7 @@ export default function CanvasView() {
       if (e.defaultPrevented || modalOpen || typing || st.editingCardId || st.editingTextId || confirmDelete) return
       if (ae?.closest('.canvas-selection-toolbar') &&
           (e.key === 'Enter' || e.key === ' ' || e.key.startsWith('Arrow'))) return
-      if (ae?.closest('.connection-selection-toolbar') &&
+      if (ae?.closest('.connection-selection-toolbar, .section-selection-toolbar') &&
           e.key !== 'Escape' && e.key !== 'Delete' && e.key !== 'Backspace') return
 
       // 连线 / Esc（保留并优先）
@@ -1004,7 +1006,7 @@ export default function CanvasView() {
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if ((e.target as Element).closest('.connection-selection-toolbar, [data-connection-id]')) return
+    if ((e.target as Element).closest('.connection-selection-toolbar, .section-selection-toolbar, [data-connection-id]')) return
 
     if (portConnection.active.current) {
       portConnection.cancel()
@@ -1170,7 +1172,7 @@ export default function CanvasView() {
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement
-      if (portConnection.active.current || target.closest('.note-card, .canvas-selection-toolbar, .connection-selection-toolbar, [data-connection-id], .card-connection-port, a, button, input, textarea, select, [contenteditable]')) return
+      if (portConnection.active.current || target.closest('.note-card, .canvas-selection-toolbar, .connection-selection-toolbar, .section-selection-toolbar, [data-connection-id], .card-connection-port, a, button, input, textarea, select, [contenteditable]')) return
       clearConnectionSelection()
       if (!selectionEmpty(selection)) {
         setSelection(emptySelection())
@@ -1390,6 +1392,7 @@ export default function CanvasView() {
   }, [portConnection.draft, meta?.id, cards])
 
   const selectedCardIds = [...selection.cardIds].filter((id) => cards.some((card) => card.id === id))
+  const selectedSections = sections.filter((section) => selection.sectionIds.has(section.id))
   const previewAppearance = getConnectionAppearance(portConnection.draft?.reconnect?.connection ?? {})
   const selectedConnections = connections.filter((connection) => selectedConnectionIds.has(connection.id))
   const cardTitles = new Map(cards.map((card) => [card.id, card.title || '无标题卡片']))
@@ -1454,7 +1457,18 @@ export default function CanvasView() {
           style={{ transform: 'translate3d(0,0,0) scale(1)', transformOrigin: '0 0' }}
         >
           {sections.map((sec) => (
-            <SectionBox key={sec.id} section={sec} scale={scaleVal.current} selected={selection.sectionIds.has(sec.id)} onSelect={(id) => setSelection({ ...emptySelection(), sectionIds: new Set([id]) })} />
+            <SectionBox key={sec.id} section={sec} scale={scaleVal.current} selected={selection.sectionIds.has(sec.id)} onSelect={(id, event) => {
+              clearConnectionSelection()
+              setConnectingFrom(null)
+              setCtxMenu(null)
+              setSelection((current) => {
+                if (!event.ctrlKey && !event.metaKey && !event.shiftKey) return { ...emptySelection(), sectionIds: new Set([id]) }
+                const sectionIds = new Set(current.sectionIds)
+                if (sectionIds.has(id)) sectionIds.delete(id)
+                else sectionIds.add(id)
+                return { ...current, sectionIds }
+              })
+            }} />
           ))}
 
           {labels.map((label) => (
@@ -1595,7 +1609,18 @@ export default function CanvasView() {
           />
         )}
 
-        {!portConnection.draft && !portConnection.picker && !editingCardId && !editingTextId && selectedConnections.length === 0 && (selectedCardIds.length > 0 || connectingFrom) && (
+        {!portConnection.draft && !portConnection.picker && !editingCardId && !editingTextId && !connectingFrom && selectedConnections.length === 0 && selectedSections.length > 0 && (
+          <SectionSelectionToolbar
+            sections={selectedSections}
+            onChange={(patch) => updateSections(selectedSections.map((section) => section.id), patch)}
+            onClear={() => {
+              setSelection(emptySelection())
+              setCtxMenu(null)
+            }}
+          />
+        )}
+
+        {!portConnection.draft && !portConnection.picker && !editingCardId && !editingTextId && selectedConnections.length === 0 && selectedSections.length === 0 && (selectedCardIds.length > 0 || connectingFrom) && (
           <CanvasSelectionToolbar
             cardCount={selectedCardIds.length}
             connecting={!!connectingFrom}

@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { v4 as uuid } from 'uuid'
-import type { Canvas, Card, CanvasLabel, Section, Connection, ConnectionSide, ConnectionAppearance, ConnectionAppearancePatch, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
+import type { Canvas, Card, CanvasLabel, Section, SectionAppearance, SectionAppearancePatch, Connection, ConnectionSide, ConnectionAppearance, ConnectionAppearancePatch, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
 import { getTodayDateKey } from './lib/dateUtils'
 import { getConnectionAppearance, sanitizeConnectionAppearancePatch } from './connectionStyle'
+import { getSectionAppearance, sanitizeSectionAppearancePatch } from './sectionStyle'
 
 export function getEffectiveProvider(settings: AppSettings): SyncProvider {
   return settings.syncProvider ?? (settings.webdav?.server ? 'webdav' : 'none')
@@ -275,6 +276,7 @@ interface AppState {
   addSection: (x: number, y: number) => void
   createSectionFromCards: (cardIds: string[]) => string | null
   updateSection: (sectionId: string, patch: Partial<Section>) => void
+  updateSections: (ids: string[], patch: SectionAppearancePatch) => void
   deleteSection: (sectionId: string) => void
   moveSection: (sectionId: string, dx: number, dy: number) => void
   autoFitSection: (sectionId: string) => void
@@ -1294,6 +1296,36 @@ export const useStore = create<AppState>((set, get) => ({
           ? { ...c, sections: (c.sections ?? []).map((sec) => sec.id === sectionId ? { ...sec, ...patch } : sec) }
           : c,
       ),
+    }))
+    get().persist()
+  },
+
+  updateSections: (ids, patch) => {
+    const validPatch = sanitizeSectionAppearancePatch(patch)
+    const keys = Object.keys(validPatch) as (keyof SectionAppearance)[]
+    if (ids.length === 0 || keys.length === 0) return
+    const { activeCanvasId, canvases } = get()
+    const canvas = canvases.find((item) => item.id === activeCanvasId)
+    if (!canvas?.sections?.length) return
+    const selectedIds = new Set(ids)
+    let changed = false
+    const sections = canvas.sections.map((section) => {
+      if (!selectedIds.has(section.id)) return section
+      const appearance = getSectionAppearance(section)
+      if (!keys.some((key) => appearance[key] !== validPatch[key])) return section
+      changed = true
+      const next = { ...section, ...validPatch }
+      // Legacy sections derive their border from the fill. Freeze that old border
+      // before changing the fill so the two color controls remain independent.
+      if (validPatch.color && validPatch.color !== appearance.color && validPatch.borderColor === undefined &&
+        sanitizeSectionAppearancePatch(section).borderColor === undefined) {
+        next.borderColor = appearance.borderColor
+      }
+      return next
+    })
+    if (!changed) return
+    set((s) => ({
+      canvases: s.canvases.map((item) => item.id === activeCanvasId ? { ...item, sections } : item),
     }))
     get().persist()
   },

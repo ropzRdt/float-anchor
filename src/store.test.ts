@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { estimateInstantCardHeight, getEffectiveProvider, isCardSnappedAdjacent, selectActiveCards, selectActiveLabels, selectActiveTexts, selectActiveSections, selectActiveConnections, useStore } from './store'
-import type { AppData, AppSettings, Canvas, Card, ConnectionAppearancePatch, ConnectionSide, Section } from './types'
+import type { AppData, AppSettings, Canvas, Card, ConnectionAppearancePatch, ConnectionSide, Section, SectionAppearancePatch } from './types'
 import { getConnectionAppearance } from './connectionStyle'
+import { getSectionAppearance } from './sectionStyle'
 import { mergeAppData } from './lib/mergeData'
 import { getComparableSyncSnapshot, normalizeSyncData } from '../electron/sync/summary'
 
@@ -1128,6 +1129,138 @@ describe('连线外观编辑与批量删除', () => {
     const synced = normalizeSyncData(JSON.parse(JSON.stringify(mergeAppData(base, incoming, current))))
     expect(getConnectionAppearance(synced.canvases[0].connections[0])).toEqual(appearance)
     expect(getConnectionAppearance(synced.canvases[0].connections[1])).toEqual(appearance)
+    expect(synced.canvases[0].cards[0].content).toBe('另一个窗口的内容')
+    expect(getComparableSyncSnapshot(synced)).not.toBe(getComparableSyncSnapshot(base))
+  })
+})
+
+describe('分区外观批量编辑', () => {
+  const originalPersist = useStore.getState().persist
+  const persist = vi.fn()
+  const mkSection = (id: string, patch: Partial<Section> = {}): Section => ({
+    id, name: `分区 ${id}`, x: 20, y: 30, width: 400, height: 300, color: '#AbC', cardIds: [], ...patch,
+  })
+
+  beforeEach(() => {
+    persist.mockClear()
+    useStore.setState({
+      activeCanvasId: 'cv',
+      canvases: [
+        { id: 'cv', name: 'cv', cards: [{ id: 'card', title: '成员', content: '保留内容', x: 60, y: 90, width: 200, height: 150 }], sections: [
+          mkSection('legacy', { cardIds: ['card'], sourceId: 'source' }),
+          mkSection('styled', { color: '#112233', borderColor: '#445566', borderStyle: 'solid' }),
+          mkSection('keep'),
+        ] },
+        { id: 'other', name: 'other', cards: [], sections: [mkSection('legacy'), mkSection('other-only')] },
+      ],
+      persist,
+    })
+  })
+
+  afterEach(() => {
+    useStore.setState({ persist: originalPersist })
+    vi.unstubAllGlobals()
+  })
+
+  it('批量局部修改仅更新当前画布选中分区，保留名称位置成员且仅保存一次', () => {
+    const [before, other] = useStore.getState().canvases
+    const changes = vi.fn()
+    const unsubscribe = useStore.subscribe(changes)
+    useStore.getState().updateSections(['legacy', 'styled', 'legacy', 'missing', 'other-only'], { borderColor: '#F80' })
+    unsubscribe()
+    const [after, unchangedOther] = useStore.getState().canvases
+    expect(after.sections).toEqual([
+      { ...before.sections![0], borderColor: '#ff8800' },
+      { ...before.sections![1], borderColor: '#ff8800' },
+      before.sections![2],
+    ])
+    expect(after.sections![2]).toBe(before.sections![2])
+    expect(after.cards).toBe(before.cards)
+    expect(unchangedOther).toBe(other)
+    expect(changes).toHaveBeenCalledTimes(1)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('只改底色时固定旧分区的原边框色，已有独立边框保持原值', () => {
+    useStore.getState().updateSections(['legacy', 'styled'], { color: '#FF8800' })
+    const sections = useStore.getState().canvases[0].sections!
+    expect(getSectionAppearance(sections[0])).toEqual({ color: '#ff8800', borderColor: '#aabbcc', borderStyle: 'dashed' })
+    expect(getSectionAppearance(sections[1])).toEqual({ color: '#ff8800', borderColor: '#445566', borderStyle: 'solid' })
+    useStore.getState().updateSections(['legacy'], { color: '#0055FF' })
+    expect(getSectionAppearance(useStore.getState().canvases[0].sections![0]).borderColor).toBe('#aabbcc')
+  })
+
+  it('同时设置底色和边框色时使用所选新值，边框线型独立', () => {
+    useStore.getState().updateSections(['legacy'], { color: '#f80', borderColor: '#00f', borderStyle: 'solid' })
+    expect(getSectionAppearance(useStore.getState().canvases[0].sections![0]))
+      .toEqual({ color: '#ff8800', borderColor: '#0000ff', borderStyle: 'solid' })
+    useStore.getState().updateSections(['legacy'], { borderStyle: 'dashed' })
+    expect(getSectionAppearance(useStore.getState().canvases[0].sections![0]))
+      .toEqual({ color: '#ff8800', borderColor: '#0000ff', borderStyle: 'dashed' })
+  })
+
+  it('旧记录设置同等外观、空选择、无效ID、非法patch均不产生写入', () => {
+    const canvases = useStore.getState().canvases
+    const { updateSections } = useStore.getState()
+    updateSections(['legacy'], { color: '#AABBCC', borderColor: '#abc', borderStyle: 'dashed' })
+    updateSections([], { borderStyle: 'solid' })
+    updateSections(['missing', 'other-only'], { color: '#123456' })
+    updateSections(['legacy'], {})
+    updateSections(['legacy'], null as unknown as SectionAppearancePatch)
+    updateSections(['legacy'], { color: 'red', borderColor: '#abcd', borderStyle: 'dotted', name: '无效', x: 999 } as unknown as SectionAppearancePatch)
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('混合patch忽略非法字段和几何字段，同值不重复保存且无活动画布不保存', () => {
+    const original = useStore.getState().canvases[0].sections![0]
+    useStore.getState().updateSections(['legacy'], { borderStyle: 'solid', color: 'red', borderColor: '#12', name: '忽略', x: 999 } as unknown as SectionAppearancePatch)
+    expect(useStore.getState().canvases[0].sections![0]).toEqual({ ...original, borderStyle: 'solid' })
+    const canvases = useStore.getState().canvases
+    useStore.getState().updateSections(['legacy'], { borderStyle: 'solid' })
+    useStore.setState({ activeCanvasId: null })
+    useStore.getState().updateSections(['legacy'], { borderColor: '#fff' })
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('非法旧颜色在改底色时保留回退后的默认边框色', () => {
+    const canvas = useStore.getState().canvases[0]
+    useStore.setState({ canvases: [{ ...canvas, sections: [mkSection('legacy', { color: 'broken', borderColor: 'also-broken' })] }] })
+    useStore.getState().updateSections(['legacy'], { color: '#F80' })
+    expect(getSectionAppearance(useStore.getState().canvases[0].sections![0]))
+      .toEqual({ color: '#ff8800', borderColor: '#4a90d9', borderStyle: 'dashed' })
+  })
+
+  it('拖动分区和成员卡片、调整大小或重命名后外观不丢失', () => {
+    const appearance = { color: '#ff8800', borderColor: '#0000ff', borderStyle: 'solid' } as const
+    useStore.getState().updateSections(['legacy'], appearance)
+    useStore.getState().moveSection('legacy', 40, 50)
+    useStore.getState().updateSection('legacy', { name: '新名称', width: 500, height: 400 })
+    const canvas = useStore.getState().canvases[0]
+    expect(getSectionAppearance(canvas.sections![0])).toEqual(appearance)
+    expect(canvas.sections![0]).toMatchObject({ x: 60, y: 80, name: '新名称', width: 500, height: 400, cardIds: ['card'], sourceId: 'source' })
+    expect(canvas.cards[0]).toMatchObject({ x: 100, y: 140, title: '成员', content: '保留内容' })
+  })
+
+  it('样式经保存重载、同步规范化和多窗口合并后仍保留', async () => {
+    let saved: AppData | null = null
+    vi.stubGlobal('window', { electronAPI: {
+      writeData: async (data: AppData) => { saved = JSON.parse(JSON.stringify(data)); return true },
+      readData: async () => saved,
+    } })
+    const base: AppData = structuredClone({ activeCanvasId: 'cv', canvases: useStore.getState().canvases })
+    const appearance = { color: '#ff8800', borderColor: '#0000ff', borderStyle: 'solid' } as const
+    useStore.getState().updateSections(['legacy', 'styled'], appearance)
+    await useStore.getState().flushPendingSave()
+    useStore.setState({ canvases: [], activeCanvasId: null })
+    await useStore.getState().loadData()
+    const incoming: AppData = { activeCanvasId: 'cv', canvases: useStore.getState().canvases }
+    const current = structuredClone(base)
+    current.canvases[0].cards[0].content = '另一个窗口的内容'
+    const synced = normalizeSyncData(JSON.parse(JSON.stringify(mergeAppData(base, incoming, current))))
+    expect(getSectionAppearance(synced.canvases[0].sections[0])).toEqual(appearance)
+    expect(getSectionAppearance(synced.canvases[0].sections[1])).toEqual(appearance)
     expect(synced.canvases[0].cards[0].content).toBe('另一个窗口的内容')
     expect(getComparableSyncSnapshot(synced)).not.toBe(getComparableSyncSnapshot(base))
   })
