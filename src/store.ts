@@ -1766,14 +1766,28 @@ export function useActiveCanvasMeta() {
   )
 }
 
+type ActiveCanvasState = Pick<AppState, 'canvases' | 'activeCanvasId'>
+
+// Missing optional collections must retain identity across store updates and renders.
+const EMPTY_CARDS: Card[] = []
+const EMPTY_LABELS: CanvasLabel[] = []
+const EMPTY_TEXTS: TextBox[] = []
+const EMPTY_SECTIONS: Section[] = []
+const EMPTY_CONNECTIONS: Connection[] = []
+
+export const selectActiveCards = (state: ActiveCanvasState) =>
+  state.canvases.find((canvas) => canvas.id === state.activeCanvasId)?.cards ?? EMPTY_CARDS
+export const selectActiveLabels = (state: ActiveCanvasState) =>
+  state.canvases.find((canvas) => canvas.id === state.activeCanvasId)?.labels ?? EMPTY_LABELS
+export const selectActiveTexts = (state: ActiveCanvasState) =>
+  state.canvases.find((canvas) => canvas.id === state.activeCanvasId)?.texts ?? EMPTY_TEXTS
+export const selectActiveSections = (state: ActiveCanvasState) =>
+  state.canvases.find((canvas) => canvas.id === state.activeCanvasId)?.sections ?? EMPTY_SECTIONS
+export const selectActiveConnections = (state: ActiveCanvasState) =>
+  state.canvases.find((canvas) => canvas.id === state.activeCanvasId)?.connections ?? EMPTY_CONNECTIONS
+
 export function useActiveCards() {
-  return useStore(
-    (s) => {
-      const c = s.canvases.find((c) => c.id === s.activeCanvasId)
-      return c?.cards ?? []
-    },
-    (a, b) => a === b,
-  )
+  return useStore(selectActiveCards)
 }
 
 export function useCardById(cardId: string) {
@@ -1803,43 +1817,19 @@ export function useCardActions() {
 }
 
 export function useActiveLabels() {
-  return useStore(
-    (s) => {
-      const c = s.canvases.find((c) => c.id === s.activeCanvasId)
-      return c?.labels ?? []
-    },
-    (a, b) => a === b,
-  )
+  return useStore(selectActiveLabels)
 }
 
 export function useActiveTexts() {
-  return useStore(
-    (s) => {
-      const c = s.canvases.find((c) => c.id === s.activeCanvasId)
-      return c?.texts ?? []
-    },
-    (a, b) => a === b,
-  )
+  return useStore(selectActiveTexts)
 }
 
 export function useActiveSections() {
-  return useStore(
-    (s) => {
-      const c = s.canvases.find((c) => c.id === s.activeCanvasId)
-      return c?.sections ?? []
-    },
-    (a, b) => a === b,
-  )
+  return useStore(selectActiveSections)
 }
 
 export function useActiveConnections() {
-  return useStore(
-    (s) => {
-      const c = s.canvases.find((c) => c.id === s.activeCanvasId)
-      return c?.connections ?? []
-    },
-    (a, b) => a === b,
-  )
+  return useStore(selectActiveConnections)
 }
 
 export function useHighlightCard() {

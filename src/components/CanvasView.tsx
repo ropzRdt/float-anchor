@@ -15,6 +15,8 @@ import { getWheelZoomFactor } from '../zoom'
 import { expandCardIdsForSelectedSections } from '../canvasSelection'
 import { getCardConnectionGeometry, getCardConnectionPreview } from '../cardConnections'
 import type { CardConnectionGeometry } from '../cardConnections'
+import { getSearchTargetBounds, getSearchTargetViewport } from '../lib/searchNavigation'
+import type { SearchNavigationTarget } from '../lib/searchNavigation'
 
 const MIN_SCALE = 0.15
 const MAX_SCALE = 3
@@ -211,6 +213,8 @@ export default function CanvasView() {
 
   const pan = useRef({ x: 0, y: 0 })
   const scaleVal = useRef(1)
+  const flyAnimRef = useRef(0)
+  const searchFocusFrameRef = useRef(0)
 
   const [cullTick, setCullTick] = useState(0)
   const cullTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -247,18 +251,19 @@ export default function CanvasView() {
   }, [meta?.id])
 
   useEffect(() => {
-    setSelection((previous) => {
-      const next = {
-        cardIds: new Set([...previous.cardIds].filter((id) => cards.some((card) => card.id === id))),
-        labelIds: new Set([...previous.labelIds].filter((id) => labels.some((label) => label.id === id))),
-        sectionIds: new Set([...previous.sectionIds].filter((id) => sections.some((section) => section.id === id))),
-        textIds: new Set([...previous.textIds].filter((id) => texts.some((text) => text.id === id))),
-      }
-      return Object.keys(next).some((key) => next[key as keyof SelectionSet].size !== previous[key as keyof SelectionSet].size)
-        ? next : previous
-    })
+    const next = {
+      cardIds: new Set([...selection.cardIds].filter((id) => cards.some((card) => card.id === id))),
+      labelIds: new Set([...selection.labelIds].filter((id) => labels.some((label) => label.id === id))),
+      sectionIds: new Set([...selection.sectionIds].filter((id) => sections.some((section) => section.id === id))),
+      textIds: new Set([...selection.textIds].filter((id) => texts.some((text) => text.id === id))),
+    }
+    // Do not enqueue no-op updates: missing entity arrays can change identity
+    // during deferred search renders and otherwise keep restarting that work.
+    if (Object.keys(next).some((key) => next[key as keyof SelectionSet].size !== selection[key as keyof SelectionSet].size)) {
+      setSelection(next)
+    }
     if (connectingFrom && !cards.some((card) => card.id === connectingFrom)) setConnectingFrom(null)
-  }, [cards, labels, sections, texts, connectingFrom])
+  }, [cards, labels, sections, texts, connectingFrom, selection])
 
   useEffect(() => {
     if (!highlightCardId) return
@@ -294,6 +299,9 @@ export default function CanvasView() {
   const prevCanvasId = useRef<string | null>(null)
 
   useEffect(() => {
+    cancelAnimationFrame(flyAnimRef.current)
+    cancelAnimationFrame(searchFocusFrameRef.current)
+    setSelection(emptySelection())
     if (prevCanvasId.current && prevCanvasId.current !== meta?.id) {
       saveViewport(prevCanvasId.current, {
         panX: pan.current.x,
@@ -813,7 +821,8 @@ export default function CanvasView() {
       const ae = document.activeElement as HTMLElement | null
       const typing = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
       const st = useStore.getState()
-      if (typing || st.editingCardId || st.editingTextId || confirmDelete) return
+      const modalOpen = !!document.querySelector('[role="dialog"][aria-modal="true"]')
+      if (e.defaultPrevented || modalOpen || typing || st.editingCardId || st.editingTextId || confirmDelete) return
       if (ae?.closest('.canvas-selection-toolbar') &&
           (e.key === 'Enter' || e.key === ' ' || e.key.startsWith('Arrow'))) return
 
@@ -1095,8 +1104,6 @@ export default function CanvasView() {
     addCard(cx + jitter(), cy + jitter())
   }
 
-  const flyAnimRef = useRef(0)
-
   const flyTo = useCallback((targetPanX: number, targetPanY: number, targetScale: number) => {
     const startPanX = pan.current.x
     const startPanY = pan.current.y
@@ -1124,6 +1131,11 @@ export default function CanvasView() {
     flyAnimRef.current = requestAnimationFrame(animate)
   }, [applyTransform, scheduleCull])
 
+  useEffect(() => () => {
+    cancelAnimationFrame(flyAnimRef.current)
+    cancelAnimationFrame(searchFocusFrameRef.current)
+  }, [])
+
   useEffect(() => {
     const handler = (e: Event) => {
       const { cardId } = (e as CustomEvent).detail
@@ -1138,6 +1150,67 @@ export default function CanvasView() {
     window.addEventListener('fa-fly-to-card', handler)
     return () => window.removeEventListener('fa-fly-to-card', handler)
   }, [cards, flyTo])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const target = (event as CustomEvent<SearchNavigationTarget>).detail
+      const state = useStore.getState()
+      const vp = viewportRef.current
+      if (!target || target.canvasId !== meta?.id || target.canvasId !== state.activeCanvasId || !vp) return
+      const canvas = state.canvases.find((item) => item.id === target.canvasId)
+      if (!canvas) return
+      if (target.type === 'board' && target.id !== canvas.id) return
+
+      if (!getSearchTargetBounds(canvas, target) && target.type !== 'board') return
+
+      const nextSelection = emptySelection()
+      if (target.type === 'card') nextSelection.cardIds.add(target.id)
+      else if (target.type === 'label') nextSelection.labelIds.add(target.id)
+      else if (target.type === 'text') nextSelection.textIds.add(target.id)
+      else if (target.type === 'section') nextSelection.sectionIds.add(target.id)
+      setSelection(nextSelection)
+      setHighlightCard(target.type === 'card' ? target.id : null)
+      setConnectingFrom(null)
+      setCtxMenu(null)
+
+      cancelAnimationFrame(searchFocusFrameRef.current)
+      searchFocusFrameRef.current = requestAnimationFrame(() => {
+        const current = useStore.getState()
+        if (current.activeCanvasId !== target.canvasId || !viewportRef.current) return
+        const currentCanvas = current.canvases.find((item) => item.id === target.canvasId)
+        if (!currentCanvas) return
+        let bounds = getSearchTargetBounds(currentCanvas, target)
+        if (!bounds && target.type !== 'board') return
+
+        // Selecting first renders culled cards so we can use their actual dimensions.
+        const inner = innerRef.current
+        let element: HTMLElement | undefined
+        if (target.type === 'card') {
+          element = Array.from(inner?.querySelectorAll<HTMLElement>('[data-card-id]') ?? [])
+            .find((item) => item.dataset.cardId === target.id)
+        } else if (target.type === 'label') {
+          const index = currentCanvas.labels?.findIndex((item) => item.id === target.id) ?? -1
+          element = inner?.querySelectorAll<HTMLElement>('.canvas-label')[index]
+        } else if (target.type === 'text') {
+          const index = currentCanvas.texts?.findIndex((item) => item.id === target.id) ?? -1
+          element = inner?.querySelectorAll<HTMLElement>('.canvas-text')[index]
+        }
+        if (bounds && element && element.offsetWidth > 0 && element.offsetHeight > 0) {
+          bounds = { ...bounds, width: element.offsetWidth, height: element.offsetHeight }
+        }
+
+        if (bounds) {
+          const viewport = getSearchTargetViewport(bounds, vp.clientWidth, vp.clientHeight)
+          flyTo(viewport.panX, viewport.panY, viewport.scale)
+        } else {
+          // Empty boards still open in a predictable initial viewport.
+          flyTo(0, 0, 1)
+        }
+      })
+    }
+    window.addEventListener('fa-focus-search-result', handler)
+    return () => window.removeEventListener('fa-focus-search-result', handler)
+  }, [meta?.id, cards, labels, texts, sections, flyTo, setHighlightCard])
 
   const handleLocate = useCallback(() => {
     const vp = viewportRef.current
@@ -1334,7 +1407,7 @@ export default function CanvasView() {
           </svg>
 
           {cards.map((card) =>
-            visibleCardIds.has(card.id) ? (
+            visibleCardIds.has(card.id) || selection.cardIds.has(card.id) ? (
               <NoteCard
                 key={card.id}
                 cardId={card.id}

@@ -1,6 +1,56 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { estimateInstantCardHeight, getEffectiveProvider, isCardSnappedAdjacent, useStore } from './store'
-import type { AppSettings, Card, Section } from './types'
+import { estimateInstantCardHeight, getEffectiveProvider, isCardSnappedAdjacent, selectActiveCards, selectActiveLabels, selectActiveTexts, selectActiveSections, selectActiveConnections, useStore } from './store'
+import type { AppSettings, Canvas, Card, Section } from './types'
+
+describe('当前画布集合的稳定引用', () => {
+  const selectors = [
+    { key: 'cards', select: selectActiveCards },
+    { key: 'labels', select: selectActiveLabels },
+    { key: 'texts', select: selectActiveTexts },
+    { key: 'sections', select: selectActiveSections },
+    { key: 'connections', select: selectActiveConnections },
+  ] as const
+
+  const makeCanvas = (id: string): Canvas => ({
+    id,
+    name: id,
+    cards: [{ id: `${id}-card`, title: '', content: '', x: 0, y: 0, width: 200 }],
+    labels: [{ id: `${id}-label`, text: '', level: 1, x: 0, y: 0, width: 200 }],
+    texts: [{ id: `${id}-text`, text: '', x: 0, y: 0, width: 200 }],
+    sections: [{ id: `${id}-section`, name: '', color: '#fff', x: 0, y: 0, width: 400, height: 400 }],
+    connections: [{ id: `${id}-connection`, fromCardId: `${id}-card`, toCardId: `${id}-other` }],
+  })
+
+  it.each(selectors)('$key 缺省时重复读取或切换无效画布均返回同一个空数组', ({ key, select }) => {
+    const state = { activeCanvasId: 'missing', canvases: [] }
+    const empty = select(state)
+    expect(empty).toEqual([])
+    expect(select(state)).toBe(empty)
+    expect(select({ ...state })).toBe(empty)
+    expect(select({ ...state, activeCanvasId: null })).toBe(empty)
+    if (key !== 'cards') {
+      expect(select({ activeCanvasId: 'legacy', canvases: [{ id: 'legacy', name: '', cards: [] }] })).toBe(empty)
+    }
+  })
+
+  it.each(selectors)('$key 保持真实集合引用，包括已有的空集合', ({ key, select }) => {
+    const canvas = makeCanvas('one')
+    const state = { activeCanvasId: 'one', canvases: [canvas] }
+    expect(select(state)).toBe(canvas[key])
+    expect(select({ ...state, canvases: [{ ...canvas, name: '重命名' }] })).toBe(canvas[key])
+    const emptyCanvas = { ...canvas, [key]: [] }
+    expect(select({ ...state, canvases: [emptyCanvas] })).toBe(emptyCanvas[key])
+  })
+
+  it.each(selectors)('$key 随活动画布切换读取对应集合，不沿用旧画布数据', ({ key, select }) => {
+    const first = makeCanvas('first')
+    const second = makeCanvas('second')
+    const state = { activeCanvasId: first.id, canvases: [first, second] }
+    expect(select(state)).toBe(first[key])
+    expect(select({ ...state, activeCanvasId: second.id })).toBe(second[key])
+    expect(select(state)).toBe(first[key])
+  })
+})
 
 describe('isCardSnappedAdjacent（拖拽贴靠分区成员的判定）', () => {
   const GAP = 12

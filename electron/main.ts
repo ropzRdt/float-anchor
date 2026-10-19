@@ -16,6 +16,7 @@ import type { RemoteAdapter, LocalStore } from './sync/types'
 import type { AppData, InstantCardSave, InstantModeTarget } from '../src/types'
 import { applyInstantCardSave, findInstantNote } from '../src/lib/instantNotes'
 import { mergeAppData } from '../src/lib/mergeData'
+import { checkForReleaseUpdate, type UpdateCheckResult } from './updater'
 
 // Development previews never use the user's real notes or settings.
 if (!app.isPackaged && process.env.FLOAT_ANCHOR_PREVIEW_DIR) {
@@ -61,30 +62,7 @@ function writeAppData(data: AppData) {
   fs.renameSync(file + '.tmp', file)
 }
 
-const GITHUB_OWNER = 'swordrada'
-const GITHUB_REPO = 'float-anchor'
 const CURRENT_VERSION = app.getVersion()
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.replace(/^v/, '').split('.').map(Number)
-  const pb = b.replace(/^v/, '').split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0)
-    if (diff !== 0) return diff
-  }
-  return 0
-}
-
-async function httpsGetJSON(url: string): Promise<any> {
-  const resp = await net.fetch(url, {
-    headers: {
-      'User-Agent': 'FloatAnchor-Updater',
-      Accept: 'application/vnd.github+json',
-    },
-  })
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-  return resp.json()
-}
 
 function getDownloadMeta(destPath: string) {
   return destPath + '.meta'
@@ -186,65 +164,57 @@ function getResumePercent(destPath: string): number {
   return 0
 }
 
-interface ReleaseAsset {
-  name: string
-  browser_download_url: string
-}
-
-interface ReleaseInfo {
-  tag_name: string
-  assets: ReleaseAsset[]
-}
-
 let updateCheckTimer: ReturnType<typeof setInterval> | null = null
+let pendingUpdateCheck: Promise<UpdateCheckResult> | null = null
 
-async function checkForUpdates(): Promise<{ hasUpdate: boolean; version?: string; currentVersion: string }> {
+async function performUpdateCheck(): Promise<UpdateCheckResult> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20_000)
   try {
-    const release: ReleaseInfo = await httpsGetJSON(
-      `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`
-    )
-    const latestVersion = release.tag_name.replace(/^v/, '')
-    if (compareVersions(latestVersion, CURRENT_VERSION) <= 0) {
-      return { hasUpdate: false, currentVersion: CURRENT_VERSION }
-    }
-
-    const platform = process.platform
-    const arch = process.arch
-    let assetName = ''
-    if (platform === 'darwin') {
-      assetName = arch === 'x64'
-        ? `FloatAnchor-${latestVersion}-mac-x64.dmg`
-        : `FloatAnchor-${latestVersion}-mac-arm64.dmg`
-    } else {
-      assetName = `FloatAnchor-${latestVersion}-win-setup.exe`
-    }
-
-    const asset = release.assets.find((a) => a.name === assetName)
-    if (!asset) return { hasUpdate: false, currentVersion: CURRENT_VERSION }
-
-    const tmpDir = path.join(app.getPath('temp'), 'float-anchor-update')
-    const destPath = path.join(tmpDir, asset.name)
-    const alreadyDownloaded = fs.existsSync(destPath)
-    const resumePct = alreadyDownloaded ? 100 : getResumePercent(destPath)
-
-    mainWindow?.webContents.send('update-available', {
-      version: latestVersion,
+    const result = await checkForReleaseUpdate({
       currentVersion: CURRENT_VERSION,
-      assetName: asset.name,
-      downloadUrl: asset.browser_download_url,
-      resumePercent: resumePct,
+      platform: process.platform,
+      arch: process.arch,
+      fetch: (url, init) => net.fetch(url, init),
+      signal: controller.signal,
     })
-
-    return { hasUpdate: true, version: latestVersion, currentVersion: CURRENT_VERSION }
+    if (result.error) console.error('Update check failed:', result.error)
+    if (result.hasUpdate && result.version && result.assetName && result.downloadUrl) {
+      const tmpDir = path.join(app.getPath('temp'), 'float-anchor-update')
+      const destPath = path.join(tmpDir, result.assetName)
+      const resumePct = fs.existsSync(destPath) ? 100 : getResumePercent(destPath)
+      mainWindow?.webContents.send('update-available', {
+        version: result.version,
+        currentVersion: CURRENT_VERSION,
+        assetName: result.assetName,
+        downloadUrl: result.downloadUrl,
+        resumePercent: resumePct,
+      })
+    }
+    return {
+      hasUpdate: result.hasUpdate,
+      currentVersion: result.currentVersion,
+      ...(result.version ? { version: result.version } : {}),
+      ...(result.error ? { error: result.error } : {}),
+    }
   } catch (err) {
     console.error('Update check failed:', err)
-    return { hasUpdate: false, currentVersion: CURRENT_VERSION }
+    return { hasUpdate: false, currentVersion: CURRENT_VERSION, error: '检查更新失败，请稍后重试' }
+  } finally {
+    clearTimeout(timeout)
   }
+}
+
+function checkForUpdates(): Promise<UpdateCheckResult> {
+  if (!pendingUpdateCheck) {
+    pendingUpdateCheck = performUpdateCheck().finally(() => { pendingUpdateCheck = null })
+  }
+  return pendingUpdateCheck
 }
 
 function startUpdateChecker() {
   setTimeout(() => checkForUpdates(), 3000)
-  updateCheckTimer = setInterval(() => checkForUpdates(), 60_000)
+  updateCheckTimer = setInterval(() => checkForUpdates(), 15 * 60_000)
 }
 
 ipcMain.handle('check-update', async () => {

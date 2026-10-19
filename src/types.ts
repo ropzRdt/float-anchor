@@ -157,6 +157,13 @@ interface UpdateInfo {
   resumePercent?: number
 }
 
+export interface UpdateCheckResult {
+  hasUpdate: boolean
+  version?: string
+  currentVersion: string
+  error?: string
+}
+
 interface UpdateProgress {
   stage: 'downloading' | 'installing' | 'error' | 'cancelled'
   percent: number
@@ -213,7 +220,7 @@ declare global {
       triggerUpdate: (downloadUrl: string, assetName: string) => Promise<{ success: boolean; error?: string }>
       cancelUpdate: () => Promise<{ success: boolean; error?: string }>
       getResumeProgress: (assetName: string) => Promise<number>
-      checkUpdate: () => Promise<{ hasUpdate: boolean; version?: string; currentVersion: string }>
+      checkUpdate: () => Promise<UpdateCheckResult>
       syncTest: (config: WebDAVConfig) => Promise<{ success: boolean; error?: string }>
       syncAuto: () => Promise<WebDAVSyncResult>
       syncStartup: () => Promise<WebDAVSyncResult>

@@ -155,10 +155,12 @@ export default function SettingsModal() {
   const [updateResumePercent, setUpdateResumePercent] = useState(0)
   const [updateInfo, setUpdateInfo] = useState<{ downloadUrl: string; assetName: string } | null>(null)
   const [currentVersion, setCurrentVersion] = useState('')
+  const [updateError, setUpdateError] = useState('')
   const checkedRef = useRef(false)
 
   useEffect(() => {
     const unsub1 = window.electronAPI.onUpdateAvailable((info) => {
+      setUpdateError('')
       setUpdateVersion(info.version)
       setUpdateInfo({ downloadUrl: info.downloadUrl, assetName: info.assetName })
       setCurrentVersion(info.currentVersion)
@@ -193,7 +195,10 @@ export default function SettingsModal() {
     setUpdateStatus('checking')
     window.electronAPI.checkUpdate().then((res) => {
       setCurrentVersion(res.currentVersion)
-      if (res.hasUpdate && res.version) {
+      if (res.error) {
+        setUpdateError(res.error)
+        setUpdateStatus((prev) => (prev === 'downloading' || prev === 'installing') ? prev : 'error')
+      } else if (res.hasUpdate && res.version) {
         setUpdateVersion(res.version)
         setUpdateStatus((prev) => (prev === 'downloading' || prev === 'installing') ? prev : 'available')
       } else {
@@ -201,26 +206,32 @@ export default function SettingsModal() {
         setUpdateStatus((prev) => (prev === 'downloading' || prev === 'installing') ? prev : 'up-to-date')
       }
     }).catch(() => {
+      setUpdateError('检查更新失败，请检查网络后重试')
       setUpdateStatus((prev) => (prev === 'downloading' || prev === 'installing') ? prev : 'error')
     })
   }, [])
 
   const handleCheckUpdate = useCallback(() => {
+    setUpdateError('')
     setUpdateStatus('checking')
     window.electronAPI.checkUpdate().then((res) => {
       setCurrentVersion(res.currentVersion)
-      if (res.hasUpdate && res.version) {
+      if (res.error) {
+        setUpdateError(res.error)
+        setUpdateStatus('error')
+      } else if (res.hasUpdate && res.version) {
         setUpdateVersion(res.version)
         setUpdateStatus('available')
       } else {
         setUpdateResumePercent(0)
         setUpdateStatus('up-to-date')
       }
-    }).catch(() => setUpdateStatus('error'))
+    }).catch(() => { setUpdateError('检查更新失败，请检查网络后重试'); setUpdateStatus('error') })
   }, [])
 
   const handleStartUpdate = useCallback(() => {
     if (!updateInfo) return
+    setUpdateError('')
     setUpdateStatus('downloading')
     setUpdateProgress(updateResumePercent > 0 ? updateResumePercent : 0)
     window.electronAPI.triggerUpdate(updateInfo.downloadUrl, updateInfo.assetName)
@@ -535,7 +546,7 @@ export default function SettingsModal() {
                 </button>
               )}
               {updateStatus === 'error' && (
-                <span className="update-error-hint">检查更新失败，请稍后再试</span>
+                <span className="update-error-hint" role="alert">{updateError || '更新失败，请稍后重试'}</span>
               )}
             </div>
           </div>
