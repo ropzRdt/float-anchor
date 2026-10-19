@@ -1,0 +1,79 @@
+.card-connection-ports {
+  position: absolute;
+  pointer-events: none;
+  z-index: 70;
+}
+
+.card-connection-port {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(var(--port-inverse-scale, 1));
+  pointer-events: auto;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.card-connection-port span {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 50%;
+  background: var(--card-bg);
+  opacity: 0.65;
+  transition: transform 0.12s, opacity 0.12s, background 0.12s, box-shadow 0.12s;
+}
+
+.port-top { left: 50%; top: 0; }
+.port-right { left: 100%; top: 50%; }
+.port-bottom { left: 50%; top: 100%; }
+.port-left { left: 0; top: 50%; }
+
+.card-connection-ports.is-selected .card-connection-port span,
+.card-connection-ports.is-connecting .card-connection-port span,
+.card-connection-port:hover span {
+  opacity: 1;
+}
+
+.card-connection-port:hover span,
+.card-connection-port.is-source span {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+.card-connection-port.is-target span {
+  opacity: 1;
+  background: var(--accent);
+  transform: scale(1.5);
+  box-shadow: 0 0 0 4px var(--accent-light);
+}
+
+.canvas-viewport.port-connecting,
+.canvas-viewport.port-connecting .note-card {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.port-connection-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+}

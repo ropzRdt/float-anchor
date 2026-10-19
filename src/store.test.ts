@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { estimateInstantCardHeight, getEffectiveProvider, isCardSnappedAdjacent, selectActiveCards, selectActiveLabels, selectActiveTexts, selectActiveSections, selectActiveConnections, useStore } from './store'
-import type { AppSettings, Canvas, Card, Section } from './types'
+import type { AppData, AppSettings, Canvas, Card, ConnectionSide, Section } from './types'
+import { mergeAppData } from './lib/mergeData'
+import { getComparableSyncSnapshot, normalizeSyncData } from '../electron/sync/summary'
 
 describe('当前画布集合的稳定引用', () => {
   const selectors = [
@@ -720,6 +722,7 @@ describe('卡片连线只引用当前画布的有效卡片', () => {
 
   afterEach(() => {
     useStore.setState({ persist: originalPersist })
+    vi.unstubAllGlobals()
   })
 
   it('拒绝自连、已删除端点和其他画布端点，不保存悬空引用', () => {
@@ -730,6 +733,12 @@ describe('卡片连线只引用当前画布的有效卡片', () => {
     addConnection('a', 'deleted')
     addConnection('other-card', 'b')
     addConnection('a', 'other-card')
+    const ports = { fromSide: 'right', toSide: 'left' } as const
+    addConnection('a', 'a', ports)
+    addConnection('deleted', 'b', ports)
+    addConnection('a', 'deleted', ports)
+    addConnection('other-card', 'b', ports)
+    addConnection('a', 'other-card', ports)
     expect(useStore.getState().canvases).toBe(canvases)
     expect(persist).not.toHaveBeenCalled()
   })
@@ -745,6 +754,109 @@ describe('卡片连线只引用当前画布的有效卡片', () => {
       { id: expect.any(String), fromCardId: 'b', toCardId: 'a' },
     ])
     expect(persist).toHaveBeenCalledTimes(2)
+  })
+
+  it('四条边的所有端口组合均可保存，相同有向端口对只创建一次', () => {
+    const { addConnection } = useStore.getState()
+    const sides: ConnectionSide[] = ['top', 'right', 'bottom', 'left']
+    for (const fromSide of sides) {
+      for (const toSide of sides) {
+        addConnection('a', 'b', { fromSide, toSide })
+        addConnection('a', 'b', { fromSide, toSide })
+      }
+    }
+    const connections = useStore.getState().canvases[0].connections!
+    expect(connections).toHaveLength(16)
+    expect(new Set(connections.map((connection) => `${connection.fromSide}:${connection.toSide}`)).size).toBe(16)
+    expect(connections.every((connection) => connection.fromCardId === 'a' && connection.toCardId === 'b')).toBe(true)
+    expect(persist).toHaveBeenCalledTimes(16)
+  })
+
+  it('指定端口的反向连线可独立创建', () => {
+    const { addConnection } = useStore.getState()
+    addConnection('a', 'b', { fromSide: 'bottom', toSide: 'top' })
+    addConnection('b', 'a', { fromSide: 'top', toSide: 'bottom' })
+    expect(useStore.getState().canvases[0].connections).toEqual([
+      { id: expect.any(String), fromCardId: 'a', toCardId: 'b', fromSide: 'bottom', toSide: 'top' },
+      { id: expect.any(String), fromCardId: 'b', toCardId: 'a', fromSide: 'top', toSide: 'bottom' },
+    ])
+  })
+
+  it('新增端口连线不会覆盖旧无端口连线，旧调用继续按同向卡片对去重', () => {
+    const { addConnection } = useStore.getState()
+    addConnection('a', 'b')
+    const originalConnection = useStore.getState().canvases[0].connections![0]
+    addConnection('a', 'b', { fromSide: 'right', toSide: 'left' })
+    addConnection('a', 'b')
+    addConnection('b', 'a', { fromSide: 'left', toSide: 'right' })
+    addConnection('b', 'a')
+
+    const connections = useStore.getState().canvases[0].connections!
+    expect(connections).toHaveLength(3)
+    expect(connections[0]).toBe(originalConnection)
+    expect(connections[0]).not.toHaveProperty('fromSide')
+    expect(connections[0]).not.toHaveProperty('toSide')
+    expect(connections[1]).toMatchObject({ fromSide: 'right', toSide: 'left' })
+    expect(persist).toHaveBeenCalledTimes(3)
+  })
+
+  it('拒绝非法或不完整的端口参数，不写入半条连线', () => {
+    const canvases = useStore.getState().canvases
+    const invalidPorts: unknown[] = [
+      null,
+      {},
+      { fromSide: 'top' },
+      { toSide: 'left' },
+      { fromSide: 'center', toSide: 'left' },
+      { fromSide: 'right', toSide: 'RIGHT' },
+      { fromSide: 0, toSide: 'bottom' },
+    ]
+    for (const ports of invalidPorts) {
+      useStore.getState().addConnection('a', 'b', ports as { fromSide: ConnectionSide; toSide: ConnectionSide })
+    }
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('移动、缩放卡片及画布后保存重载，保留所有端口和旧连线', async () => {
+    let saved: AppData | null = null
+    vi.stubGlobal('window', { electronAPI: {
+      writeData: async (data: AppData) => { saved = JSON.parse(JSON.stringify(data)); return true },
+      readData: async () => saved,
+    } })
+    const { addConnection } = useStore.getState()
+    addConnection('a', 'b')
+    addConnection('a', 'b', { fromSide: 'top', toSide: 'bottom' })
+    const connections = useStore.getState().canvases[0].connections
+
+    useStore.getState().moveCard('a', 70, 80)
+    useStore.getState().updateCard('b', { width: 350, height: 260 })
+    useStore.getState().saveViewport('cv', { panX: 20, panY: -30, scale: 0.5 })
+    await useStore.getState().flushPendingSave()
+    useStore.setState({ canvases: [], activeCanvasId: null })
+    await useStore.getState().loadData()
+
+    expect(useStore.getState().canvases[0].connections).toEqual(connections)
+    expect(useStore.getState().canvases[0].cards[0]).toMatchObject({ x: 70, y: 80 })
+    expect(useStore.getState().canvases[0].cards[1]).toMatchObject({ width: 350, height: 260 })
+    expect(useStore.getState().canvases[0].viewport).toEqual({ panX: 20, panY: -30, scale: 0.5 })
+  })
+
+  it('同步快照与多窗口合并保留端口，端口变化参与同步差异比较', () => {
+    useStore.getState().addConnection('a', 'b')
+    const base: AppData = structuredClone({ activeCanvasId: 'cv', canvases: useStore.getState().canvases })
+    useStore.getState().addConnection('a', 'b', { fromSide: 'right', toSide: 'top' })
+    const incoming: AppData = structuredClone({ activeCanvasId: 'cv', canvases: useStore.getState().canvases })
+    const current = structuredClone(base)
+    current.canvases[0].cards[1].content = '另一个窗口的内容'
+
+    const merged = mergeAppData(base, incoming, current)
+    const synced = normalizeSyncData(JSON.parse(JSON.stringify(merged)))
+    expect(synced.canvases[0].connections).toEqual(incoming.canvases[0].connections)
+    expect(synced.canvases[0].cards[1].content).toBe('另一个窗口的内容')
+    const otherPorts = structuredClone(synced)
+    otherPorts.canvases[0].connections[1].fromSide = 'left'
+    expect(getComparableSyncSnapshot(synced)).not.toBe(getComparableSyncSnapshot(otherPorts))
   })
 })
 

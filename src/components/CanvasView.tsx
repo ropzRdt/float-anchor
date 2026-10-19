@@ -8,6 +8,8 @@ import ContextMenu from './ContextMenu'
 import MoveToModal from './MoveToModal'
 import ConfirmModal from './ConfirmModal'
 import CanvasSelectionToolbar from './CanvasSelectionToolbar'
+import CardConnectionPorts from './CardConnectionPorts'
+import { useCardPortConnection } from './useCardPortConnection'
 import type { Card, Connection, Section, CanvasLabel, TextBox } from '../types'
 import type { MenuItem } from './ContextMenu'
 import { scKey } from '../shortcuts'
@@ -427,6 +429,8 @@ export default function CanvasView() {
     }
   }, [])
 
+  const portConnection = useCardPortConnection(meta?.id, cards, toCanvasCoords)
+
   const viewportCenterCanvasCoords = useCallback(() => {
     const rect = viewportRef.current?.getBoundingClientRect()
     if (!rect) return { x: 0, y: 0 }
@@ -510,6 +514,7 @@ export default function CanvasView() {
 
   const handleCardMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return
+    if (portConnection.active.current) { e.preventDefault(); return }
     suppressCardClick.current = false
     const target = e.target as HTMLElement
     const cardElement = target.closest<HTMLElement>('.note-card')
@@ -553,6 +558,7 @@ export default function CanvasView() {
   }, [selection, sections, connectingFrom, addConnection])
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (portConnection.active.current) { e.preventDefault(); return }
     if (e.defaultPrevented) return
     const target = e.target as HTMLElement
     if (target.closest('a, button, input, textarea, select, [contenteditable], .note-card.editing, .card-resize-handle, .section-resize-handle, .text-resize-handle, .canvas-selection-toolbar')) return
@@ -817,6 +823,7 @@ export default function CanvasView() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (portConnection.active.current) return
       // 编辑输入上下文 / 确认弹窗打开 → 不处理全局快捷键
       const ae = document.activeElement as HTMLElement | null
       const typing = !!ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)
@@ -924,6 +931,11 @@ export default function CanvasView() {
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+
+    if (portConnection.active.current) {
+      portConnection.cancel()
+      return
+    }
 
     if (rightDragged.current) return
 
@@ -1279,10 +1291,21 @@ export default function CanvasView() {
         const from = cardMap.get(conn.fromCardId)
         const to = cardMap.get(conn.toCardId)
         if (!from || !to) return null
-        return { ...conn, ...getCardConnectionGeometry(from, to) }
+        return { ...conn, ...getCardConnectionGeometry(from, to, conn) }
       })
       .filter(Boolean) as (Connection & CardConnectionGeometry)[]
   }, [cards, connections])
+
+  const portPreview = useMemo(() => {
+    const draft = portConnection.draft
+    if (!draft || draft.canvasId !== meta?.id) return null
+    const source = cards.find((card) => card.id === draft.source.cardId)
+    if (!source) return null
+    const target = draft.target && cards.find((card) => card.id === draft.target?.cardId)
+    return target && draft.target
+      ? getCardConnectionGeometry(source, target, { fromSide: draft.source.side, toSide: draft.target.side })
+      : getCardConnectionPreview(source, draft.pointer, draft.source.side)
+  }, [portConnection.draft, meta?.id, cards])
 
   const selectedCardIds = [...selection.cardIds].filter((id) => cards.some((card) => card.id === id))
   const pairConnected = selectedCardIds.length === 2 && connections.some((connection) =>
@@ -1327,7 +1350,7 @@ export default function CanvasView() {
 
       <div
         ref={viewportRef}
-        className={`canvas-viewport ${isPanDragging ? 'panning' : ''} ${connectingFrom ? 'connecting' : ''}`}
+        className={`canvas-viewport ${isPanDragging ? 'panning' : ''} ${connectingFrom ? 'connecting' : ''} ${portConnection.draft ? 'port-connecting' : ''}`}
         onMouseDownCapture={handleCardMouseDown}
         onClickCapture={(event) => {
           if (suppressCardClick.current && (event.target as HTMLElement).closest('.note-card')) {
@@ -1366,6 +1389,9 @@ export default function CanvasView() {
                 <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent)" />
               </marker>
             </defs>
+            {portPreview && (
+              <path d={portPreview.path} className="conn-line conn-preview port-preview" markerEnd="url(#arrowhead-active)" />
+            )}
             {connectingFrom && connectingMouse && (() => {
               const fromCard = cards.find((c) => c.id === connectingFrom)
               if (!fromCard) return null
@@ -1379,7 +1405,9 @@ export default function CanvasView() {
               )
             })()}
             {connectionPaths.map((conn) => (
-              <g key={conn.id}
+              <g key={conn.id} data-connection-id={conn.id}
+                data-from-card-id={conn.fromCardId} data-to-card-id={conn.toCardId}
+                data-from-side={conn.fromSide} data-to-side={conn.toSide}
                 onMouseEnter={() => setHoveredConn(conn.id)}
                 onMouseLeave={() => setHoveredConn(null)}
               >
@@ -1407,7 +1435,7 @@ export default function CanvasView() {
           </svg>
 
           {cards.map((card) =>
-            visibleCardIds.has(card.id) || selection.cardIds.has(card.id) ? (
+            visibleCardIds.has(card.id) || selection.cardIds.has(card.id) || portConnection.draft?.source.cardId === card.id ? (
               <NoteCard
                 key={card.id}
                 cardId={card.id}
@@ -1430,6 +1458,28 @@ export default function CanvasView() {
             ),
           )}
 
+          {!editingCardId && !editingTextId && cards.filter((card) =>
+            visibleCardIds.has(card.id) || selection.cardIds.has(card.id) || portConnection.draft?.source.cardId === card.id,
+          ).map((card) => (
+            <CardConnectionPorts
+              key={card.id}
+              card={card}
+              scale={scaleVal.current}
+              selected={selection.cardIds.has(card.id)}
+              source={portConnection.draft?.source}
+              target={portConnection.draft?.target}
+              onStart={(event, port) => {
+                if (event.button !== 0 || !event.isPrimary) return
+                setConnectingFrom(null)
+                setCtxMenu(null)
+                setHoveredConn(null)
+                portConnection.start(event, port)
+              }}
+              onLostCapture={portConnection.lostCapture}
+              onCancel={portConnection.cancel}
+            />
+          ))}
+
           {lassoRect && (
             <div
               className="lasso-rect"
@@ -1449,7 +1499,13 @@ export default function CanvasView() {
           </div>
         )}
 
-        {!editingCardId && !editingTextId && (selectedCardIds.length > 0 || connectingFrom) && (
+        {portConnection.draft && (
+          <div className="port-connection-hint" role="status">
+            {portConnection.draft.target ? '松开鼠标完成连线' : '拖到另一张卡片的连接点'} · Esc 取消
+          </div>
+        )}
+
+        {!portConnection.draft && !editingCardId && !editingTextId && (selectedCardIds.length > 0 || connectingFrom) && (
           <CanvasSelectionToolbar
             cardCount={selectedCardIds.length}
             connecting={!!connectingFrom}

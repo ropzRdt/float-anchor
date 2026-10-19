@@ -55,10 +55,14 @@ export interface TextBox {
   sourceId?: string
 }
 
+export type ConnectionSide = 'top' | 'right' | 'bottom' | 'left'
+
 export interface Connection {
   id: string
   fromCardId: string
   toCardId: string
+  fromSide?: ConnectionSide
+  toSide?: ConnectionSide
 }
 
 export interface CanvasViewport {

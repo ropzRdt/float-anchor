@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { getCardConnectionGeometry, getCardConnectionPreview } from './cardConnections'
+import { getCardConnectionGeometry, getCardConnectionPoint, getCardConnectionPreview } from './cardConnections'
 import type { CardConnectionGeometry, ConnectionPoint } from './cardConnections'
+import type { Card, ConnectionSide } from './types'
 
 const card = (x: number, y: number, width = 200, height = 120) => ({ x, y, width, height })
 
@@ -96,6 +97,128 @@ describe('card connection geometry', () => {
       expect(geometry.path).not.toMatch(/NaN|Infinity/)
       for (const point of [geometry.start, geometry.end, geometry.control1, geometry.control2, geometry.midpoint]) {
         expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true)
+      }
+    }
+  })
+})
+
+describe('fixed card connection ports', () => {
+  const sides: ConnectionSide[] = ['top', 'right', 'bottom', 'left']
+  const normal: Record<ConnectionSide, ConnectionPoint> = {
+    top: { x: 0, y: -1 },
+    right: { x: 1, y: 0 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+  }
+  const source = card(10, 20, 200, 120)
+  const target = card(430, 240, 280, 180)
+  const sourcePorts: Record<ConnectionSide, ConnectionPoint> = {
+    top: { x: 110, y: 20 },
+    right: { x: 210, y: 80 },
+    bottom: { x: 110, y: 140 },
+    left: { x: 10, y: 80 },
+  }
+  const targetPorts: Record<ConnectionSide, ConnectionPoint> = {
+    top: { x: 570, y: 240 },
+    right: { x: 710, y: 330 },
+    bottom: { x: 570, y: 420 },
+    left: { x: 430, y: 330 },
+  }
+
+  function expectOutward(point: ConnectionPoint, control: ConnectionPoint, side: ConnectionSide) {
+    const delta = { x: control.x - point.x, y: control.y - point.y }
+    expect(delta.x * normal[side].x + delta.y * normal[side].y).toBeGreaterThan(0)
+    expect(delta.x * normal[side].y - delta.y * normal[side].x).toBe(0)
+  }
+
+  it.each(sides)('%s 返回卡片边的中点', (side) => {
+    expect(getCardConnectionPoint(source, side)).toEqual(sourcePorts[side])
+    expect(getCardConnectionPoint(target, side)).toEqual(targetPorts[side])
+  })
+
+  const portPairs = sides.flatMap((fromSide) => sides.map((toSide) => ({ fromSide, toSide })))
+  it.each(portPairs)('$fromSide → $toSide 始终锚定指定边，两个控制点均朝外', (ports) => {
+    const geometry = getCardConnectionGeometry(source, target, ports)
+    expect(geometry.start).toEqual(sourcePorts[ports.fromSide])
+    expect(geometry.end).toEqual(targetPorts[ports.toSide])
+    expectOutward(geometry.start, geometry.control1, ports.fromSide)
+    expectOutward(geometry.end, geometry.control2, ports.toSide)
+    expect(geometry.midpoint).toEqual(pointOnCurve(geometry, 0.5))
+
+    const reverse = getCardConnectionGeometry(target, source, { fromSide: ports.toSide, toSide: ports.fromSide })
+    expect(reverse.start).toEqual(geometry.end)
+    expect(reverse.end).toEqual(geometry.start)
+    expect(reverse.control1).toEqual(geometry.control2)
+    expect(reverse.control2).toEqual(geometry.control1)
+  })
+
+  it.each(portPairs)('$fromSide → $toSide 在卡片移动到相反方向及调整大小后保留原边', (ports) => {
+    const movedSource = card(700, 600, 400, 240)
+    const movedTarget = card(-200, -300, 140, 90)
+    const geometry = getCardConnectionGeometry(movedSource, movedTarget, ports)
+
+    expect(geometry.start).toEqual(getCardConnectionPoint(movedSource, ports.fromSide))
+    expect(geometry.end).toEqual(getCardConnectionPoint(movedTarget, ports.toSide))
+    expectOutward(geometry.start, geometry.control1, ports.fromSide)
+    expectOutward(geometry.end, geometry.control2, ports.toSide)
+  })
+
+  it.each(sides)('%s 预览始终从指定边出发，跟随各方向指针', (side) => {
+    const pointers = [{ x: -200, y: 80 }, { x: 400, y: 80 }, { x: 110, y: -200 }, { x: 110, y: 400 }, sourcePorts[side]]
+    for (const pointer of pointers) {
+      const geometry = getCardConnectionPreview(source, pointer, side)
+      expect(geometry.start).toEqual(sourcePorts[side])
+      expect(geometry.end).toEqual(pointer)
+      expectOutward(geometry.start, geometry.control1, side)
+    }
+  })
+
+  it('仅指定一端时，另一端沿用自动选边', () => {
+    const automatic = getCardConnectionGeometry(source, target)
+    const fixedSource = getCardConnectionGeometry(source, target, { fromSide: 'top' })
+    const fixedTarget = getCardConnectionGeometry(source, target, { toSide: 'bottom' })
+
+    expect(fixedSource.start).toEqual(sourcePorts.top)
+    expect(fixedSource.end).toEqual(automatic.end)
+    expect(fixedTarget.start).toEqual(automatic.start)
+    expect(fixedTarget.end).toEqual(targetPorts.bottom)
+  })
+
+  it('缺省或非法边值保留旧记录的自动路径', () => {
+    const automatic = getCardConnectionGeometry(source, target)
+    expect(getCardConnectionGeometry(source, target, {})).toEqual(automatic)
+    expect(getCardConnectionGeometry(source, target, { fromSide: undefined, toSide: undefined })).toEqual(automatic)
+    expect(getCardConnectionGeometry(source, target, {
+      fromSide: 'unknown' as ConnectionSide,
+      toSide: null as unknown as ConnectionSide,
+    })).toEqual(automatic)
+    expect(getCardConnectionPreview(source, { x: 500, y: 50 }, 'unknown' as ConnectionSide)).toEqual(
+      getCardConnectionPreview(source, { x: 500, y: 50 }),
+    )
+  })
+
+  it('异常坐标、缺失尺寸、相同端点和零尺寸卡片均生成有限坐标', () => {
+    const invalidCards = [
+      {} as Card,
+      null as unknown as Card,
+      card(NaN, Infinity, -10, -20),
+      card(Number.MAX_VALUE, -Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE),
+      card(10, 20, 0, 0),
+    ]
+    for (const invalidCard of invalidCards) {
+      for (const ports of portPairs) {
+        const geometry = getCardConnectionGeometry(invalidCard, invalidCard, ports)
+        expect(geometry.path).not.toMatch(/NaN|Infinity/)
+        for (const point of [geometry.start, geometry.end, geometry.control1, geometry.control2, geometry.midpoint]) {
+          expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true)
+        }
+      }
+      for (const side of sides) {
+        const point = getCardConnectionPoint(invalidCard, side)
+        expect(Number.isFinite(point.x) && Number.isFinite(point.y)).toBe(true)
+        const preview = getCardConnectionPreview(invalidCard, { x: NaN, y: Infinity }, side)
+        expect(preview.end).toEqual({ x: 0, y: 0 })
+        expect(preview.path).not.toMatch(/NaN|Infinity/)
       }
     }
   })

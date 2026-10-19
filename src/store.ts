@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { v4 as uuid } from 'uuid'
-import type { Canvas, Card, CanvasLabel, Section, Connection, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
+import type { Canvas, Card, CanvasLabel, Section, Connection, ConnectionSide, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
 import { getTodayDateKey } from './lib/dateUtils'
 
 export function getEffectiveProvider(settings: AppSettings): SyncProvider {
@@ -285,7 +285,7 @@ interface AppState {
   finalizeCardMove: (cardId: string) => void
   finalizeCardMoves: (cardIds: string[]) => void
 
-  addConnection: (fromCardId: string, toCardId: string) => void
+  addConnection: (fromCardId: string, toCardId: string, ports?: { fromSide: ConnectionSide; toSide: ConnectionSide }) => void
   deleteConnection: (connId: string) => void
 
   saveViewport: (canvasId: string, viewport: CanvasViewport) => void
@@ -296,6 +296,7 @@ let syncTimer: ReturnType<typeof setTimeout> | undefined
 let lastRemoteUploadAt = 0
 
 const SECTION_COLORS = ['#9ca3af', '#60a5fa', '#34d399', '#fb923c', '#f472b6']
+const CONNECTION_SIDES = new Set<ConnectionSide>(['top', 'right', 'bottom', 'left'])
 const LOCAL_WEBDAV_SYNC_DELAY_MS = 2000
 const MIN_REMOTE_UPLOAD_INTERVAL_MS = 30000
 
@@ -1707,15 +1708,24 @@ export const useStore = create<AppState>((set, get) => ({
     get().persist()
   },
 
-  addConnection: (fromCardId, toCardId) => {
+  addConnection: (fromCardId, toCardId, ports) => {
     const { activeCanvasId } = get()
     if (!activeCanvasId || fromCardId === toCardId) return
+    if (ports !== undefined && (!ports || !CONNECTION_SIDES.has(ports.fromSide) || !CONNECTION_SIDES.has(ports.toSide))) return
     const canvas = get().canvases.find((c) => c.id === activeCanvasId)
     if (!canvas) return
     if (!canvas.cards.some((card) => card.id === fromCardId) || !canvas.cards.some((card) => card.id === toCardId)) return
-    const exists = (canvas.connections ?? []).some((c) => c.fromCardId === fromCardId && c.toCardId === toCardId)
+    const exists = (canvas.connections ?? []).some((connection) =>
+      connection.fromCardId === fromCardId && connection.toCardId === toCardId &&
+      (!ports || (connection.fromSide === ports.fromSide && connection.toSide === ports.toSide)),
+    )
     if (exists) return
-    const conn: Connection = { id: uuid(), fromCardId, toCardId }
+    const conn: Connection = {
+      id: uuid(),
+      fromCardId,
+      toCardId,
+      ...(ports ? { fromSide: ports.fromSide, toSide: ports.toSide } : {}),
+    }
     set((s) => ({
       canvases: s.canvases.map((c) =>
         c.id === activeCanvasId
