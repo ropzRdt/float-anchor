@@ -57,7 +57,16 @@ export interface TextBox {
 
 export type ConnectionSide = 'top' | 'right' | 'bottom' | 'left'
 
-export interface Connection {
+export interface ConnectionAppearance {
+  lineStyle: 'solid' | 'dashed'
+  arrow: 'none' | 'end' | 'start' | 'both'
+  strokeWidth: number
+  label: string
+}
+
+export type ConnectionAppearancePatch = Partial<ConnectionAppearance>
+
+export interface Connection extends ConnectionAppearancePatch {
   id: string
   fromCardId: string
   toCardId: string

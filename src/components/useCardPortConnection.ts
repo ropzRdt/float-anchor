@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import type { Card, Connection, ConnectionSide } from '../types'
 import type { CardPort } from './CardConnectionPorts'
 import { resolveCardConnectionSides } from '../cardConnections'
+import { getConnectionAppearance } from '../connectionStyle'
 import type { ConnectionPoint } from '../cardConnections'
 
 interface Reconnection {
@@ -75,7 +76,10 @@ export function useCardPortConnection(
         const source = { cardId: endpoint === 'from' ? from.id : to.id, side: endpoint === 'from' ? sides.fromSide : sides.toSide }
         const fixed = { cardId: endpoint === 'from' ? to.id : from.id, side: endpoint === 'from' ? sides.toSide : sides.fromSide }
         const other = endpoint === 'from' ? to : from
-        const choice = { connection, endpoint, fixed, label: `${endpoint === 'from' ? '连向' : '来自'}「${other.title || '无标题卡片'}」${sideLabels[fixed.side]}侧` }
+        const { arrow, label } = getConnectionAppearance(connection)
+        const direction = arrow === 'both' ? '双向连接' : arrow === 'none' ? '连接'
+          : (endpoint === 'from') === (arrow === 'end') ? '连向' : '来自'
+        const choice = { connection, endpoint, fixed, label: `${direction}「${other.title || '无标题卡片'}」${sideLabels[fixed.side]}侧${label ? ` · ${label}` : ''}` }
         const key = portKey(source)
         choicesByPort.set(key, [...(choicesByPort.get(key) ?? []), choice])
         const occupied = connectedSides.get(source.cardId) ?? new Set<ConnectionSide>()

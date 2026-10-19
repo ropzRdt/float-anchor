@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { estimateInstantCardHeight, getEffectiveProvider, isCardSnappedAdjacent, selectActiveCards, selectActiveLabels, selectActiveTexts, selectActiveSections, selectActiveConnections, useStore } from './store'
-import type { AppData, AppSettings, Canvas, Card, ConnectionSide, Section } from './types'
+import type { AppData, AppSettings, Canvas, Card, ConnectionAppearancePatch, ConnectionSide, Section } from './types'
+import { getConnectionAppearance } from './connectionStyle'
 import { mergeAppData } from './lib/mergeData'
 import { getComparableSyncSnapshot, normalizeSyncData } from '../electron/sync/summary'
 
@@ -990,6 +991,145 @@ describe('拖动已有连线的端点', () => {
     useStore.getState().reconnectConnection(original.id, 'to', 'c', 'top')
     expect(useStore.getState().canvases).toBe(canvases)
     expect(persist).not.toHaveBeenCalled()
+  })
+})
+
+describe('连线外观编辑与批量删除', () => {
+  const originalPersist = useStore.getState().persist
+  const persist = vi.fn()
+  const mkCard = (id: string): Card => ({ id, title: '', content: '', x: 0, y: 0, width: 200, height: 150 })
+
+  beforeEach(() => {
+    persist.mockClear()
+    useStore.setState({
+      activeCanvasId: 'cv',
+      canvases: [
+        { id: 'cv', name: 'cv', cards: [mkCard('a'), mkCard('b'), mkCard('c')], connections: [
+          { id: 'one', fromCardId: 'a', toCardId: 'b', fromSide: 'right', toSide: 'left', arrow: 'both', strokeWidth: 4, label: '原文字' },
+          { id: 'two', fromCardId: 'b', toCardId: 'c' },
+          { id: 'keep', fromCardId: 'c', toCardId: 'a', lineStyle: 'dashed', arrow: 'none' },
+        ] },
+        { id: 'other', name: 'other', cards: [mkCard('oa'), mkCard('ob')], connections: [
+          { id: 'one', fromCardId: 'oa', toCardId: 'ob' },
+          { id: 'other-only', fromCardId: 'ob', toCardId: 'oa' },
+        ] },
+      ],
+      persist,
+    })
+  })
+
+  afterEach(() => {
+    useStore.setState({ persist: originalPersist })
+    vi.unstubAllGlobals()
+  })
+
+  it('批量局部修改只更新选中的当前画布连线，保留端点与其他样式且仅保存一次', () => {
+    const [before, otherCanvas] = useStore.getState().canvases
+    const changes = vi.fn()
+    const unsubscribe = useStore.subscribe(changes)
+
+    useStore.getState().updateConnections(['one', 'two', 'one', 'missing', 'other-only'], { lineStyle: 'dashed', label: '新的关系' })
+
+    unsubscribe()
+    const [after, unchangedOtherCanvas] = useStore.getState().canvases
+    expect(after.connections).toEqual([
+      { ...before.connections![0], lineStyle: 'dashed', label: '新的关系' },
+      { ...before.connections![1], lineStyle: 'dashed', label: '新的关系' },
+      before.connections![2],
+    ])
+    expect(after.connections![2]).toBe(before.connections![2])
+    expect(after.cards).toBe(before.cards)
+    expect(unchangedOtherCanvas).toBe(otherCanvas)
+    expect(changes).toHaveBeenCalledTimes(1)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('旧记录设置默认外观、空选择、失效ID和非法空patch均不产生写入', () => {
+    const canvases = useStore.getState().canvases
+    const { updateConnections } = useStore.getState()
+    updateConnections(['two'], { lineStyle: 'solid', arrow: 'end', strokeWidth: 2, label: '' })
+    updateConnections([], { lineStyle: 'dashed' })
+    updateConnections(['missing', 'other-only'], { arrow: 'both' })
+    updateConnections(['one'], {})
+    updateConnections(['one'], null as unknown as ConnectionAppearancePatch)
+    updateConnections(['one'], { lineStyle: 'dotted', arrow: 'sideways', strokeWidth: 7, label: '多行\n文字', fromCardId: 'c' } as unknown as ConnectionAppearancePatch)
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('混合patch只接受合法字段，允许清空文字且相同值不重复保存', () => {
+    const original = useStore.getState().canvases[0].connections![0]
+    useStore.getState().updateConnections(['one'], { arrow: 'start', label: '', strokeWidth: NaN, lineStyle: 'bad' } as unknown as ConnectionAppearancePatch)
+    expect(useStore.getState().canvases[0].connections![0]).toEqual({ ...original, arrow: 'start', label: '' })
+    const canvases = useStore.getState().canvases
+    useStore.getState().updateConnections(['one'], { arrow: 'start', label: '' })
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('批量删除去重并忽略其他画布ID，不删除卡片和未选择的连线', () => {
+    const [before, otherCanvas] = useStore.getState().canvases
+    const changes = vi.fn()
+    const unsubscribe = useStore.subscribe(changes)
+
+    useStore.getState().deleteConnections(['one', 'two', 'one', 'missing', 'other-only'])
+
+    unsubscribe()
+    const [after, unchangedOtherCanvas] = useStore.getState().canvases
+    expect(after.connections).toEqual([before.connections![2]])
+    expect(after.cards).toBe(before.cards)
+    expect(unchangedOtherCanvas).toBe(otherCanvas)
+    expect(changes).toHaveBeenCalledTimes(1)
+    expect(persist).toHaveBeenCalledTimes(1)
+    useStore.getState().deleteConnections([])
+    useStore.getState().deleteConnections(['one', 'two', 'other-only'])
+    expect(useStore.getState().canvases[0]).toBe(after)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('旧单删API继续可用，重复删除和无活动画布时不保存', () => {
+    useStore.getState().deleteConnection('one')
+    expect(useStore.getState().canvases[0].connections!.map((connection) => connection.id)).toEqual(['two', 'keep'])
+    useStore.getState().deleteConnection('one')
+    useStore.setState({ activeCanvasId: null })
+    const canvases = useStore.getState().canvases
+    useStore.getState().updateConnections(['two'], { label: '不应写入' })
+    useStore.getState().deleteConnections(['two'])
+    expect(useStore.getState().canvases).toBe(canvases)
+    expect(persist).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['from', 'to'] as const)('重连%s端点保留外观、文字、ID和另一端', (endpoint) => {
+    useStore.getState().updateConnections(['one'], { lineStyle: 'dashed', arrow: 'start', strokeWidth: 6, label: '依赖关系' })
+    const original = useStore.getState().canvases[0].connections![0]
+
+    useStore.getState().reconnectConnection('one', endpoint, 'c', 'top')
+
+    expect(useStore.getState().canvases[0].connections![0]).toEqual(endpoint === 'from'
+      ? { ...original, fromCardId: 'c', fromSide: 'top' }
+      : { ...original, toCardId: 'c', toSide: 'top' })
+  })
+
+  it('样式和文字经保存重载、同步规范化和多窗口合并后仍保留', async () => {
+    let saved: AppData | null = null
+    vi.stubGlobal('window', { electronAPI: {
+      writeData: async (data: AppData) => { saved = JSON.parse(JSON.stringify(data)); return true },
+      readData: async () => saved,
+    } })
+    const base: AppData = structuredClone({ activeCanvasId: 'cv', canvases: useStore.getState().canvases })
+    const appearance = { lineStyle: 'dashed', arrow: 'both', strokeWidth: 5, label: '先完成 A，再执行 B' } as const
+    useStore.getState().updateConnections(['one', 'two'], appearance)
+    await useStore.getState().flushPendingSave()
+    useStore.setState({ canvases: [], activeCanvasId: null })
+    await useStore.getState().loadData()
+    const incoming: AppData = { activeCanvasId: 'cv', canvases: useStore.getState().canvases }
+    const current = structuredClone(base)
+    current.canvases[0].cards[0].content = '另一个窗口的内容'
+    const synced = normalizeSyncData(JSON.parse(JSON.stringify(mergeAppData(base, incoming, current))))
+    expect(getConnectionAppearance(synced.canvases[0].connections[0])).toEqual(appearance)
+    expect(getConnectionAppearance(synced.canvases[0].connections[1])).toEqual(appearance)
+    expect(synced.canvases[0].cards[0].content).toBe('另一个窗口的内容')
+    expect(getComparableSyncSnapshot(synced)).not.toBe(getComparableSyncSnapshot(base))
   })
 })
 

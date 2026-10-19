@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { shallow } from 'zustand/shallow'
 import { v4 as uuid } from 'uuid'
-import type { Canvas, Card, CanvasLabel, Section, Connection, ConnectionSide, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
+import type { Canvas, Card, CanvasLabel, Section, Connection, ConnectionSide, ConnectionAppearance, ConnectionAppearancePatch, CanvasViewport, AppSettings, WebDAVConfig, WebDAVSyncDecision, TextBox, SyncProvider, JournalData } from './types'
 import { getTodayDateKey } from './lib/dateUtils'
+import { getConnectionAppearance, sanitizeConnectionAppearancePatch } from './connectionStyle'
 
 export function getEffectiveProvider(settings: AppSettings): SyncProvider {
   return settings.syncProvider ?? (settings.webdav?.server ? 'webdav' : 'none')
@@ -287,6 +288,8 @@ interface AppState {
 
   addConnection: (fromCardId: string, toCardId: string, ports?: { fromSide: ConnectionSide; toSide: ConnectionSide }) => void
   reconnectConnection: (connId: string, endpoint: 'from' | 'to', targetCardId: string, targetSide: ConnectionSide, fixedSide?: ConnectionSide) => void
+  updateConnections: (ids: string[], patch: ConnectionAppearancePatch) => void
+  deleteConnections: (ids: string[]) => void
   deleteConnection: (connId: string) => void
 
   saveViewport: (canvasId: string, viewport: CanvasViewport) => void
@@ -1767,18 +1770,44 @@ export const useStore = create<AppState>((set, get) => ({
     get().persist()
   },
 
-  deleteConnection: (connId) => {
-    const { activeCanvasId } = get()
-    if (!activeCanvasId) return
+  updateConnections: (ids, patch) => {
+    const validPatch = sanitizeConnectionAppearancePatch(patch)
+    const keys = Object.keys(validPatch) as (keyof ConnectionAppearance)[]
+    if (ids.length === 0 || keys.length === 0) return
+    const { activeCanvasId, canvases } = get()
+    const canvas = canvases.find((item) => item.id === activeCanvasId)
+    if (!canvas?.connections?.length) return
+    const selectedIds = new Set(ids)
+    let changed = false
+    const connections = canvas.connections.map((connection) => {
+      if (!selectedIds.has(connection.id)) return connection
+      const appearance = getConnectionAppearance(connection)
+      if (!keys.some((key) => appearance[key] !== validPatch[key])) return connection
+      changed = true
+      return { ...connection, ...validPatch }
+    })
+    if (!changed) return
     set((s) => ({
-      canvases: s.canvases.map((c) =>
-        c.id === activeCanvasId
-          ? { ...c, connections: (c.connections ?? []).filter((cn) => cn.id !== connId) }
-          : c,
-      ),
+      canvases: s.canvases.map((item) => item.id === activeCanvasId ? { ...item, connections } : item),
     }))
     get().persist()
   },
+
+  deleteConnections: (ids) => {
+    if (ids.length === 0) return
+    const { activeCanvasId, canvases } = get()
+    const canvas = canvases.find((item) => item.id === activeCanvasId)
+    if (!canvas?.connections?.length) return
+    const selectedIds = new Set(ids)
+    const connections = canvas.connections.filter((connection) => !selectedIds.has(connection.id))
+    if (connections.length === canvas.connections.length) return
+    set((s) => ({
+      canvases: s.canvases.map((item) => item.id === activeCanvasId ? { ...item, connections } : item),
+    }))
+    get().persist()
+  },
+
+  deleteConnection: (connId) => get().deleteConnections([connId]),
 
   saveViewport: (canvasId, viewport) => {
     set((s) => ({

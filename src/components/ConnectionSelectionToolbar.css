@@ -1,0 +1,166 @@
+.connection-selection-toolbar {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  z-index: 120;
+  width: max-content;
+  max-width: calc(100% - 24px);
+  padding: 8px 10px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.connection-toolbar-main,
+.connection-toolbar-controls,
+.connection-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.connection-toolbar-main {
+  gap: 6px 12px;
+}
+
+.connection-toolbar-count {
+  padding: 5px 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.connection-toolbar-count strong {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.connection-toolbar-field,
+.connection-toolbar-text-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.connection-toolbar-field > span,
+.connection-toolbar-text-field > span {
+  flex-shrink: 0;
+}
+
+.connection-toolbar-field select,
+.connection-toolbar-text-field input {
+  min-height: 32px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--card-bg);
+}
+
+.connection-toolbar-field select {
+  cursor: pointer;
+}
+
+.connection-toolbar-text-field input {
+  flex: 1;
+  width: 100%;
+  user-select: text;
+}
+
+.connection-toolbar-text-field input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.connection-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.connection-toolbar-button svg {
+  flex: 0 0 auto;
+}
+
+.connection-toolbar-button:hover:not(:disabled) {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.connection-toolbar-button.is-primary:not(:disabled) {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+
+.connection-toolbar-button.is-danger:hover {
+  color: var(--danger);
+  background: var(--sidebar-hover);
+}
+
+.connection-toolbar-button:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.connection-toolbar-button:focus-visible,
+.connection-toolbar-field select:focus-visible,
+.connection-toolbar-text-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.connection-toolbar-text-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.connection-toolbar-text-field {
+  flex: 1 1 220px;
+}
+
+.connection-toolbar-text-count {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.connection-toolbar-hint {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
