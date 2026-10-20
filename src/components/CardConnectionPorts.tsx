@@ -20,12 +20,14 @@ interface Props {
   connectedSides?: Set<ConnectionSide>
   source?: CardPort
   target?: CardPort | null
-  onStart: (event: PointerEvent<HTMLButtonElement>, port: CardPort) => void
+  hovered?: CardPort | null
+  hoveredConnected?: boolean
+  onStart: (event: PointerEvent<HTMLButtonElement>) => void
   onLostCapture: (pointerId: number) => void
   onCancel: () => void
 }
 
-export default function CardConnectionPorts({ card, scale, connectedSides, source, target, onStart, onLostCapture, onCancel }: Props) {
+export default function CardConnectionPorts({ card, scale, connectedSides, source, target, hovered, hoveredConnected, onStart, onLostCapture, onCancel }: Props) {
   return (
     <div
       className="card-connection-ports"
@@ -35,23 +37,25 @@ export default function CardConnectionPorts({ card, scale, connectedSides, sourc
         width: card.width,
         height: card.height ?? 200,
         '--port-inverse-scale': 1 / Math.max(0.15, scale),
+        cursor: source ? 'grabbing' : hoveredConnected ? 'grab' : 'crosshair',
       } as CSSProperties}
     >
       {sides.map(({ side, label }) => {
         const isSource = source?.cardId === card.id && source.side === side
         const isTarget = target?.cardId === card.id && target.side === side
+        const isHovered = hovered?.cardId === card.id && hovered.side === side
         const connected = connectedSides?.has(side)
         return (
           <button
             key={side}
             type="button"
-            className={`card-connection-port port-${side}${connected ? ' is-connected' : ''}${isSource ? ' is-source' : ''}${isTarget ? ' is-target' : ''}`}
+            className={`card-connection-port port-${side}${connected ? ' is-connected' : ''}${isSource ? ' is-source' : ''}${isTarget ? ' is-target' : ''}${isHovered ? ' is-hovered' : ''}`}
             data-port-card-id={card.id}
             data-connection-side={side}
             aria-label={`${card.title || '无标题卡片'}：${label}侧连接点`}
-            title={connected ? `拖动修改${label}侧连接点的已有连线` : `从${label}侧连接点拖到另一张卡片的连接点`}
+            title={hovered && !isHovered ? undefined : connected ? `拖动修改${label}侧连接点的已有连线` : `从${label}侧连接点拖到另一张卡片的连接点`}
             tabIndex={-1}
-            onPointerDown={(event) => onStart(event, { cardId: card.id, side })}
+            onPointerDown={onStart}
             onLostPointerCapture={(event) => onLostCapture(event.pointerId)}
             onClick={(event) => { event.preventDefault(); event.stopPropagation() }}
             onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation() }}

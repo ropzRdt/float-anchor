@@ -1567,13 +1567,15 @@ export default function CanvasView() {
               connectedSides={portConnection.connectedSides.get(card.id)}
               source={portConnection.draft?.source}
               target={portConnection.draft?.target}
-              onStart={(event, port) => {
+              hovered={portConnection.hovered}
+              hoveredConnected={!!portConnection.hovered && portConnection.connectedSides.get(portConnection.hovered.cardId)?.has(portConnection.hovered.side)}
+              onStart={(event) => {
                 if (event.button !== 0 || !event.isPrimary) return
                 clearConnectionSelection()
                 setConnectingFrom(null)
                 setCtxMenu(null)
                 setHoveredConn(null)
-                portConnection.start(event, port)
+                portConnection.start(event)
               }}
               onLostCapture={portConnection.lostCapture}
               onCancel={portConnection.cancel}

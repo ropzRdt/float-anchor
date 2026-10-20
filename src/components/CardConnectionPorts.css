@@ -13,7 +13,7 @@
   background: transparent;
   border-radius: 8px;
   pointer-events: auto;
-  cursor: crosshair;
+  cursor: inherit;
   touch-action: none;
   user-select: none;
 }
@@ -70,12 +70,12 @@
 }
 .port-left span { left: 16px; top: 50%; }
 
-.card-connection-port:hover span,
+.card-connection-port.is-hovered span,
 .card-connection-port.is-source span {
   opacity: 1;
 }
 
-.card-connection-port:hover span,
+.card-connection-port.is-hovered span,
 .card-connection-port.is-source span {
   background: var(--accent);
   transform: scale(1.25);
@@ -87,9 +87,6 @@
   transform: scale(1.5);
   box-shadow: 0 0 0 4px var(--accent-light);
 }
-
-.card-connection-port.is-connected { cursor: grab; }
-.card-connection-port.is-source { cursor: grabbing; }
 
 .port-connection-picker {
   position: fixed;

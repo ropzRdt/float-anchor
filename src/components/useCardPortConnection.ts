@@ -5,6 +5,7 @@ import type { Card, Connection, ConnectionSide } from '../types'
 import type { CardPort } from './CardConnectionPorts'
 import { resolveCardConnectionSides } from '../cardConnections'
 import { getConnectionAppearance } from '../connectionStyle'
+import { findCardPortAtPoint } from '../cardPortHitTest'
 import type { ConnectionPoint } from '../cardConnections'
 
 interface Reconnection {
@@ -40,11 +41,8 @@ const sideLabels: Record<ConnectionSide, string> = { top: '上', right: '右', b
 const portKey = (port: CardPort) => `${port.cardId}/${port.side}`
 
 function targetAtPoint(x: number, y: number, fixed: CardPort): CardPort | null {
-  const element = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-port-card-id][data-connection-side]')
-  const cardId = element?.dataset.portCardId
-  const side = element?.dataset.connectionSide as ConnectionSide | undefined
-  if (!cardId || cardId === fixed.cardId || !side || !['top', 'right', 'bottom', 'left'].includes(side)) return null
-  return { cardId, side }
+  const hit = findCardPortAtPoint(x, y)
+  return hit && hit.port.cardId !== fixed.cardId ? hit.port : null
 }
 
 function unchangedConnection(a: Connection, b?: Connection) {
@@ -59,6 +57,7 @@ export function useCardPortConnection(
 ) {
   const [draft, setDraft] = useState<PortConnectionDraft | null>(null)
   const [picker, setPicker] = useState<ConnectionPicker | null>(null)
+  const [hovered, setHovered] = useState<CardPort | null>(null)
   const active = useRef<ActiveDrag | null>(null)
   const pickerRef = useRef<ConnectionPicker | null>(null)
   const closePicker = useCallback(() => { pickerRef.current = null; setPicker(null) }, [])
@@ -95,6 +94,7 @@ export function useCardPortConnection(
     active.current = null
     if (drag?.element.hasPointerCapture(drag.pointerId)) drag.element.releasePointerCapture(drag.pointerId)
     setDraft(null)
+    setHovered(null)
     closePicker()
   }, [closePicker])
 
@@ -110,14 +110,17 @@ export function useCardPortConnection(
     setDraft({ canvasId, source, fixed, reconnect, target: null, pointer: toCanvasCoords(event.clientX, event.clientY) })
   }, [canvasId, cancel, toCanvasCoords])
 
-  const start = useCallback((event: ReactPointerEvent<HTMLButtonElement>, source: CardPort) => {
+  const start = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0 || !event.isPrimary || !canvasId) return
+    const hit = findCardPortAtPoint(event.clientX, event.clientY)
+    if (!hit) return
+    const { port: source, element } = hit
     const choices = choicesByPort.get(portKey(source)) ?? []
-    if (choices.length <= 1) { begin(event, source, event.currentTarget, choices[0]); return }
+    if (choices.length <= 1) { begin(event, source, element, choices[0]); return }
     event.preventDefault()
     event.stopPropagation()
     cancel()
-    const next = { source, element: event.currentTarget, choices, x: Math.max(8, Math.min(event.clientX + 12, window.innerWidth - 272)), y: Math.max(8, Math.min(event.clientY + 12, window.innerHeight - 290)) }
+    const next = { source, element, choices, x: Math.max(8, Math.min(event.clientX + 12, window.innerWidth - 272)), y: Math.max(8, Math.min(event.clientY + 12, window.innerHeight - 290)) }
     pickerRef.current = next
     setPicker(next)
   }, [canvasId, choicesByPort, begin, cancel])
@@ -133,6 +136,7 @@ export function useCardPortConnection(
 
   useEffect(() => { cancel() }, [canvasId, cancel])
   useEffect(() => {
+    setHovered(null)
     const drag = active.current
     if (drag && (!cards.some((card) => card.id === drag.source.cardId) || !cards.some((card) => card.id === drag.fixed.cardId) ||
       (drag.reconnect && !unchangedConnection(drag.reconnect.connection, connections.find((conn) => conn.id === drag.reconnect?.connection.id))))) cancel()
@@ -142,7 +146,14 @@ export function useCardPortConnection(
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
       const drag = active.current
-      if (!drag || event.pointerId !== drag.pointerId) return
+      if (!drag) {
+        // Avoid hit-testing the whole canvas unless the pointer is over a port.
+        const port = (event.target as Element).closest('.card-connection-port')
+          ? findCardPortAtPoint(event.clientX, event.clientY)?.port ?? null : null
+        setHovered((current) => current?.cardId === port?.cardId && current?.side === port?.side ? current : port)
+        return
+      }
+      if (event.pointerId !== drag.pointerId) return
       if (event.buttons === 0) { cancel(); return }
       event.preventDefault()
       setDraft({ ...drag, target: targetAtPoint(event.clientX, event.clientY, drag.fixed), pointer: toCanvasCoords(event.clientX, event.clientY) })
@@ -150,7 +161,8 @@ export function useCardPortConnection(
     const onUp = (event: PointerEvent) => {
       const drag = active.current
       if (!drag || event.pointerId !== drag.pointerId || event.button !== 0) return
-      const target = targetAtPoint(event.clientX, event.clientY, drag.fixed)
+      const hit = findCardPortAtPoint(event.clientX, event.clientY)
+      const target = hit && hit.port.cardId !== drag.fixed.cardId ? hit.port : null
       const store = useStore.getState()
       if (target && store.activeCanvasId === drag.canvasId) {
         if (drag.reconnect) {
@@ -163,9 +175,11 @@ export function useCardPortConnection(
         }
       }
       cancel()
+      setHovered(hit?.port ?? null)
     }
     const onCancel = (event: PointerEvent) => { if (event.pointerId === active.current?.pointerId) cancel() }
     const onKey = (event: KeyboardEvent) => {
+      if (!active.current) setHovered(null)
       if ((!active.current && !pickerRef.current) || event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
@@ -174,7 +188,14 @@ export function useCardPortConnection(
     const onDown = (event: PointerEvent) => {
       if (!(event.target as Element).closest('.port-connection-picker')) closePicker()
     }
+    const onOut = (event: PointerEvent) => {
+      if (active.current) return
+      const port = (event.relatedTarget as Element | null)?.closest?.('.card-connection-port')
+        ? findCardPortAtPoint(event.clientX, event.clientY)?.port ?? null : null
+      setHovered((current) => current?.cardId === port?.cardId && current?.side === port?.side ? current : port)
+    }
     const onWheel = (event: WheelEvent) => {
+      setHovered(null)
       if (!(event.target as Element).closest('.port-connection-picker')) closePicker()
       if (!active.current) return
       event.preventDefault()
@@ -182,6 +203,7 @@ export function useCardPortConnection(
     }
     document.addEventListener('pointerdown', onDown, true)
     document.addEventListener('pointermove', onMove, { passive: false })
+    document.addEventListener('pointerout', onOut)
     document.addEventListener('pointerup', onUp)
     document.addEventListener('pointercancel', onCancel)
     document.addEventListener('keydown', onKey, true)
@@ -191,6 +213,7 @@ export function useCardPortConnection(
     return () => {
       document.removeEventListener('pointerdown', onDown, true)
       document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerout', onOut)
       document.removeEventListener('pointerup', onUp)
       document.removeEventListener('pointercancel', onCancel)
       document.removeEventListener('keydown', onKey, true)
@@ -203,5 +226,5 @@ export function useCardPortConnection(
     }
   }, [cancel, closePicker, toCanvasCoords])
 
-  return { draft, active, start, cancel, lostCapture, connectedSides, picker, pick }
+  return { draft, active, start, cancel, lostCapture, connectedSides, picker, pick, hovered }
 }
