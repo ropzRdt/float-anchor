@@ -570,11 +570,17 @@ export default function CanvasView() {
     document.addEventListener('mouseup', onUp)
   }, [toCanvasCoords])
 
-  const handleCardMouseDown = useCallback((e: React.MouseEvent) => {
+  const handleCanvasMouseDownCapture = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return
     if (portConnection.active.current) { e.preventDefault(); return }
     suppressCardClick.current = false
     const target = e.target as HTMLElement
+    // Selection handlers prevent the browser's default focus transfer. Restore
+    // canvas focus before children can stop bubbling, but leave editors and
+    // controls (including line selection) in charge of their own focus.
+    if (!target.closest('a, button, input, textarea, select, [contenteditable], .note-card.editing, .canvas-selection-toolbar, .connection-selection-toolbar, .section-selection-toolbar, [data-connection-id], .card-connection-port')) {
+      viewportRef.current?.focus({ preventScroll: true })
+    }
     // These children stop bubbling, so clear line selection during capture.
     if (target.closest('.note-card, .canvas-label, .canvas-text, .section-box')) clearConnectionSelection()
     const cardElement = target.closest<HTMLElement>('.note-card')
@@ -1438,8 +1444,9 @@ export default function CanvasView() {
 
       <div
         ref={viewportRef}
+        tabIndex={-1}
         className={`canvas-viewport ${isPanDragging ? 'panning' : ''} ${connectingFrom ? 'connecting' : ''} ${portConnection.draft ? 'port-connecting' : ''}`}
-        onMouseDownCapture={handleCardMouseDown}
+        onMouseDownCapture={handleCanvasMouseDownCapture}
         onClickCapture={(event) => {
           if (suppressCardClick.current && (event.target as HTMLElement).closest('.note-card')) {
             event.preventDefault()

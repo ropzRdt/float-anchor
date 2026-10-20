@@ -6,15 +6,12 @@
 
 .card-connection-port {
   position: absolute;
-  display: grid;
-  place-items: center;
   width: 32px;
   height: 32px;
   padding: 0;
   border: 0;
   background: transparent;
-  border-radius: 50%;
-  transform: translate(-50%, -50%) scale(var(--port-inverse-scale, 1));
+  border-radius: 8px;
   pointer-events: auto;
   cursor: crosshair;
   touch-action: none;
@@ -22,19 +19,56 @@
 }
 
 .card-connection-port span {
+  position: absolute;
   width: 8px;
   height: 8px;
+  margin: -4px 0 0 -4px;
   border: 1.5px solid var(--accent);
   border-radius: 50%;
   background: var(--card-bg);
+  pointer-events: none;
   opacity: 0;
   transition: transform 0.12s, opacity 0.12s, background 0.12s, box-shadow 0.12s;
 }
 
-.port-top { left: 50%; top: 0; }
-.port-right { left: 100%; top: 50%; }
-.port-bottom { left: 50%; top: 100%; }
-.port-left { left: 0; top: 50%; }
+/* Keep hit areas outside the card, with only 1px inside so the dot's center
+   remains draggable. Preserve the original 16px outward reach to avoid
+   extending farther toward adjacent cards. */
+.port-top {
+  height: 17px;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -16px) scale(var(--port-inverse-scale, 1));
+  transform-origin: 50% 16px;
+}
+.port-top span { left: 50%; top: 16px; }
+
+.port-right {
+  width: 17px;
+  left: 100%;
+  top: 50%;
+  transform: translate(-1px, -50%) scale(var(--port-inverse-scale, 1));
+  transform-origin: 1px 50%;
+}
+.port-right span { left: 1px; top: 50%; }
+
+.port-bottom {
+  height: 17px;
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, -1px) scale(var(--port-inverse-scale, 1));
+  transform-origin: 50% 1px;
+}
+.port-bottom span { left: 50%; top: 1px; }
+
+.port-left {
+  width: 17px;
+  left: 0;
+  top: 50%;
+  transform: translate(-16px, -50%) scale(var(--port-inverse-scale, 1));
+  transform-origin: 16px 50%;
+}
+.port-left span { left: 16px; top: 50%; }
 
 .card-connection-port:hover span,
 .card-connection-port.is-source span {
